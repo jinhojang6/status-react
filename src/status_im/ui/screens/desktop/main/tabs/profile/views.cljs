@@ -81,11 +81,18 @@
      [vector-icons/icon :icons/qr {:style {:tint-color colors/blue}}]]]])
 
 (views/defview profile [user]
-  (views/letsubs [current-view-id [:get :view-id]]
-    (let [adv-settings-open? (= current-view-id :advanced-settings)]
+  (views/letsubs [current-view-id [:get :view-id]
+                  current-account [:get-current-account]]
+    (let [adv-settings-open? (= current-view-id :advanced-settings)
+          notifications? (get-in current-account [:settings :desktop-notifications?])]
       [react/view styles/profile-view
        [profile-badge user]
        [share-contact-code]
+       [react/view {:style (styles/profile-row false)}
+        [react/text {:style (styles/profile-row-text colors/black)} (i18n/label :notifications)]
+        [react/touchable-highlight {:on-press #(re-frame/dispatch [:enable-notifications (not notifications?)])}
+         [react/text {:style (styles/profile-row-text (if notifications? colors/black colors/red))}
+          (if notifications? "ON" "OFF")]]]
        [react/touchable-highlight {:style  (styles/profile-row adv-settings-open?)
                                    :on-press #(re-frame/dispatch [:navigate-to (if adv-settings-open? :home :advanced-settings)])}
         [react/view {:style styles/adv-settings}
