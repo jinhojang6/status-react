@@ -40,6 +40,7 @@
                     :photo-path            (identicon/identicon public-key)
                     :mnemonic              ""
                     :signed-up?            true
+                    :desktop-notifications? false
                     :signing-phrase        phrase
                     :settings              (constants/default-account-settings)
                     :wallet-set-up-passed? false
