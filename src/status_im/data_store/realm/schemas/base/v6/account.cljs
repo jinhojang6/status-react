@@ -22,7 +22,6 @@
                                                     :objectType :bootnode}
                           :last-request            {:type :int :optional true}
                           :settings                {:type :string}
-                          :desktop-notifications?  {:type :bool :default false}
                           :sharing-usage-data?     {:type :bool :default false}
                           :dev-mode?               {:type :bool :default false}
                           :seed-backed-up?         {:type :bool :default false}

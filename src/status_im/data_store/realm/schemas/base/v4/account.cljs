@@ -21,7 +21,6 @@
                           :bootnodes              {:type       :list
                                                    :objectType :bootnode}
                           :last-request           {:type :int :optional true}
-                          :desktop-notifications? {:type :bool :default false}
                           :settings               {:type :string}
                           :sharing-usage-data?    {:type :bool :default false}
                           :dev-mode?              {:type :bool :default false}

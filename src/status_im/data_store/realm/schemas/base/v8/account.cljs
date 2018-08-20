@@ -1,3 +1,4 @@
+
 (ns status-im.data-store.realm.schemas.base.v8.account
   (:require [taoensso.timbre :as log]
             [cognitect.transit :as transit]
@@ -26,3 +27,4 @@
                                         #(set/difference % removed-tokens)))
             updated      (serialize new-settings)]
         (aset account "settings" updated)))))
+

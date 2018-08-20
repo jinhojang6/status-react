@@ -1,4 +1,4 @@
-(ns status-im.data-store.realm.schemas.base.v7.account)
+(ns status-im.data-store.realm.schemas.base.v9.account)
 
 (def schema {:name       :account
              :primaryKey :address
@@ -17,6 +17,7 @@
                                                     :default false}
                           :network                 :string
                           :networks                {:type       :list
+                          :desktop-notifications?  {:type :bool :default false}
                                                     :objectType :network}
                           :bootnodes               {:type       :list
                                                     :objectType :bootnode}

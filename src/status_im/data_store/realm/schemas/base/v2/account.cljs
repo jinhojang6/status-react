@@ -15,7 +15,6 @@
                           :last-sign-in           {:type :int :default 0}
                           :signed-up?             {:type    :bool
                                                    :default false}
-                          :desktop-notifications? {:type :bool :default false}
                           :network                :string
                           :networks               {:type       :list
                                                    :objectType :network}
