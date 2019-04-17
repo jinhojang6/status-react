@@ -1,12 +1,6 @@
 (ns status-im.native-module.impl.module
-  (:require-macros
-   [cljs.core.async.macros :refer [go-loop go]])
   (:require [status-im.ui.components.react :as r]
             [re-frame.core :as re-frame]
-            [taoensso.timbre :as log]
-            [cljs.core.async :as async]
-            [status-im.utils.platform :as p]
-            [status-im.utils.async :as async-util]
             [status-im.react-native.js-dependencies :as rn-dependencies]
             [clojure.string :as string]
             [status-im.utils.platform :as platform]))
@@ -100,9 +94,29 @@
   (when (and @node-started status)
     (.signMessage status rpcParams callback)))
 
+(defn hash-transaction [rpcParams callback]
+  (when (and @node-started status)
+    (.hashTransaction status rpcParams callback)))
+
+(defn hash-message [message callback]
+  (when (and @node-started status)
+    (.hashMessage status message callback)))
+
+(defn hash-typed-data [data callback]
+  (when (and @node-started status)
+    (.hashTypedData status data callback)))
+
+(defn sign-typed-data [data password callback]
+  (when (and @node-started status)
+    (.signTypedData status data password callback)))
+
 (defn send-transaction [rpcParams password callback]
   (when (and @node-started status)
     (.sendTransaction status rpcParams password callback)))
+
+(defn send-transaction-with-signature [rpcParams sig callback]
+  (when (and @node-started status)
+    (.sendTransactionWithSignature status rpcParams sig callback)))
 
 (defn close-application []
   (.closeApplication status))
@@ -142,6 +156,14 @@
 (defn update-mailservers [enodes on-result]
   (when status
     (.updateMailservers status enodes on-result)))
+
+(defn chaos-mode-update [on on-result]
+  (when status
+    (.chaosModeUpdate status on on-result)))
+
+(defn get-nodes-from-contract [rpc-endpoint contract-address on-result]
+  (when status
+    (.getNodesFromContract status rpc-endpoint contract-address on-result)))
 
 (defn rooted-device? [callback]
   (cond

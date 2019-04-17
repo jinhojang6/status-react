@@ -9,7 +9,8 @@
             [status-im.ui.screens.hardwallet.components :as components]
             [status-im.ui.components.toolbar.view :as toolbar]
             [status-im.ui.components.status-bar.view :as status-bar]
-            [status-im.ui.components.toolbar.actions :as actions]))
+            [status-im.ui.components.toolbar.actions :as actions]
+            [status-im.ui.components.toolbar.actions :as toolbar.actions]))
 
 (defn numpad-button [n step enabled?]
   [react/touchable-highlight
@@ -31,8 +32,7 @@
    [numpad-row [4 5 6] step enabled?]
    [numpad-row [7 8 9] step enabled?]
    [react/view styles/numpad-row-container
-    [react/view styles/numpad-empty-button
-     [react/text {:style styles/numpad-empty-button-text}]]
+    [react/view styles/numpad-empty-button]
     [numpad-button 0 step enabled?]
     [react/touchable-highlight
      {:on-press #(when enabled?
@@ -76,16 +76,14 @@
     [react/scroll-view
      [react/view styles/pin-container
       [react/view styles/center-container
-       [react/text {:style styles/center-title-text
-                    :font  :bold}
+       [react/text {:style styles/center-title-text}
         (i18n/label title-label)]
        [react/text {:style           styles/create-pin-text
                     :number-of-lines 2}
         (i18n/label description-label)]
        (when retry-counter
-         [react/text {:style {:font-weight :bold
+         [react/text {:style {:font-weight "700"
                               :padding-top 10
-                              :font-size   15
                               :color       colors/red}}
           (i18n/label :t/pin-retries-left {:number retry-counter})])
        (case status
@@ -93,8 +91,7 @@
                      [react/activity-indicator {:animating true
                                                 :size      :small}]]
          :error [react/view styles/error-container
-                 [react/text {:style styles/error-text
-                              :font  :medium}
+                 [react/text {:style styles/error-text}
                   (i18n/label error-label)]]
          (if (= step :puk)
            [puk-indicators pin]
@@ -103,6 +100,20 @@
 
 (def pin-retries 3)
 (def puk-retries 5)
+
+(defview create-pin []
+  (letsubs [pin [:hardwallet/pin]
+            step [:hardwallet/pin-enter-step]
+            status [:hardwallet/pin-status]
+            error-label [:hardwallet/pin-error-label]]
+    [pin-view {:pin               pin
+               :title-label       (case step
+                                    :confirmation :t/repeat-pin
+                                    :t/create-a-pin)
+               :description-label :t/create-pin-description
+               :step              step
+               :status            status
+               :error-label       error-label}]))
 
 (defview enter-pin []
   (letsubs [pin [:hardwallet/pin]
@@ -114,7 +125,12 @@
     [react/view {:flex             1
                  :background-color colors/white}
      [status-bar/status-bar]
-     [toolbar/toolbar nil toolbar/default-nav-back nil]
+     [toolbar/toolbar
+      nil
+      [toolbar/nav-button (assoc toolbar.actions/default-back
+                                 :handler
+                                 #(re-frame/dispatch [:hardwallet.ui/navigate-back-button-clicked]))]
+      nil]
      (if (zero? pin-retry-counter)
        [pin-view {:pin               pin
                   :retry-counter     (when (< puk-retry-counter puk-retries) puk-retry-counter)
@@ -128,11 +144,12 @@
                   :title-label       (case step
                                        :current :t/current-pin
                                        :login :t/current-pin
-                                       :original :t/create-pin
+                                       :original :t/create-a-pin
                                        :confirmation :t/repeat-pin
                                        :t/current-pin)
                   :description-label (case step
                                        :current :t/current-pin-description
+                                       :sign :t/current-pin-description
                                        :login :t/login-pin-description
                                        :t/new-pin-description)
                   :step              step

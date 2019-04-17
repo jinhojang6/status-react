@@ -6,7 +6,11 @@
             [status-im.chat.constants :as chat.constants]
             [status-im.chat.db :as chat.db]
             [status-im.models.transactions :as transactions]
-            [status-im.utils.platform :as platform]))
+            [status-im.utils.platform :as platform]
+            [status-im.utils.universal-links.core :as links]
+            [status-im.ui.components.bottom-bar.styles :as tabs.styles]
+            [status-im.ui.components.toolbar.styles :as toolbar.styles]
+            [status-im.ui.screens.chat.stickers.styles :as stickers.styles]))
 
 (re-frame/reg-sub ::chats :chats)
 (re-frame/reg-sub ::access-scope->command-id :access-scope->command-id)
@@ -52,32 +56,37 @@
    (get chats chat-id)))
 
 (re-frame/reg-sub
+ :chats/content-layout-height
+ :<- [:get :content-layout-height]
+ :<- [:chats/current-chat-ui-prop :input-height]
+ :<- [:chats/current-chat-ui-prop :input-focused?]
+ :<- [:get :keyboard-height]
+ :<- [:chats/current-chat-ui-prop :show-stickers?]
+ (fn [[home-content-layout-height input-height input-focused? kheight stickers?]]
+   (- (+ home-content-layout-height tabs.styles/tabs-height)
+      (if platform/iphone-x?
+        (* 2 toolbar.styles/toolbar-height)
+        toolbar.styles/toolbar-height)
+      (if input-height input-height 0)
+      (if stickers?
+        (stickers.styles/stickers-panel-height)
+        kheight)
+      (if input-focused?
+        (cond
+          platform/iphone-x? 0
+          platform/ios?      tabs.styles/tabs-diff
+          :else              0)
+        (cond
+          platform/iphone-x? (* 2 tabs.styles/minimized-tabs-height)
+          platform/ios?      tabs.styles/tabs-height
+          :else              tabs.styles/minimized-tabs-height)))))
+
+(re-frame/reg-sub
  :chats/current-chat-ui-props
  :<- [::chat-ui-props]
  :<- [:chats/current-chat-id]
  (fn [[chat-ui-props id]]
    (get chat-ui-props id)))
-
-(re-frame/reg-sub
- :chats/current-chat-contact
- :<- [:contacts/contacts]
- :<- [:chats/current-chat-id]
- (fn [[contacts chat-id]]
-   (get contacts chat-id)))
-
-(re-frame/reg-sub
- :chats/current-chat-name
- :<- [:chats/current-chat-contact]
- :<- [:chats/current-chat]
- (fn [[contact chat]]
-   (chat.db/chat-name chat contact)))
-
-(re-frame/reg-sub
- :chats/chat-name
- :<- [:contacts/contacts]
- :<- [::chats]
- (fn [[contacts chats] [_ chat-id]]
-   (chat.db/chat-name (get chats chat-id) (get contacts chat-id))))
 
 (re-frame/reg-sub
  :chats/current-chat-ui-prop
@@ -96,8 +105,14 @@
  :<- [:get :keyboard-height]
  (fn [kb-height]
    (cond
-     (and platform/iphone-x? (> kb-height 0)) (- kb-height 34)
-     platform/ios? kb-height
+     (and platform/iphone-x? (> kb-height 0))
+     (- kb-height (* 2 tabs.styles/minimized-tabs-height))
+
+     platform/ios?
+     (+ kb-height (- (if (> kb-height 0)
+                       tabs.styles/minimized-tabs-height
+                       0)))
+
      :default 0)))
 
 (re-frame/reg-sub
@@ -113,7 +128,13 @@
  :<- [:chats/active-chats]
  :<- [:chats/current-chat-id]
  (fn [[chats current-chat-id]]
-   (get chats current-chat-id)))
+   (let [current-chat (get chats current-chat-id)
+         messages     (:messages current-chat)]
+     (if (empty? messages)
+       (assoc current-chat
+              :universal-link
+              (links/generate-link :public-chat :external current-chat-id))
+       current-chat))))
 
 (re-frame/reg-sub
  :chats/current-chat-message
@@ -146,15 +167,46 @@
    (or referenced-messages {})))
 
 (re-frame/reg-sub
+ :chats/current-chat-topic
+ (fn [db]
+   (chat.db/topic-by-current-chat db)))
+
+(re-frame/reg-sub
+ :chats/messages-gap
+ :<- [:get-in [:mailserver/topics]]
+ :<- [:chats/current-chat-topic]
+ (fn [[mailserver-topics topic]]
+   (chat.db/messages-gap mailserver-topics topic)))
+
+(re-frame/reg-sub
  :chats/current-chat-messages-stream
  :<- [:chats/current-chat-messages]
  :<- [:chats/current-chat-message-groups]
  :<- [:chats/current-chat-message-statuses]
  :<- [:chats/current-chat-referenced-messages]
- (fn [[messages message-groups message-statuses referenced-messages]]
+ :<- [:chats/messages-gap]
+ (fn [[messages message-groups message-statuses referenced-messages messages-gap]]
    (-> (chat.db/sort-message-groups message-groups messages)
-       (chat.db/messages-with-datemarks-and-statuses messages message-statuses referenced-messages)
+       (chat.db/messages-with-datemarks-and-statuses messages message-statuses referenced-messages messages-gap)
        chat.db/messages-stream)))
+
+(re-frame/reg-sub
+ :chats/fetching-gap-in-progress?
+ (fn [db]
+   (let [chat-id (:current-chat-id db)
+         gaps (:mailserver/fetching-gaps-in-progress db)]
+     (contains? gaps chat-id))))
+
+(re-frame/reg-sub
+ :chats/current-chat-intro-status
+ :<- [:chats/current-chat]
+ :<- [:chats/current-chat-messages]
+ (fn [[{:keys [might-have-join-time-messages?]} messages]]
+   (if might-have-join-time-messages?
+     :loading
+     (if (empty? messages)
+       :empty
+       :messages))))
 
 (re-frame/reg-sub
  :chats/available-commands
@@ -181,8 +233,8 @@
  :chats/input-placeholder
  :<- [:chats/current-chat]
  :<- [:chats/selected-chat-command]
- (fn [[{:keys [input-text]} {:keys [params current-param-position]}]]
-   (when (string/ends-with? (or input-text "") chat.constants/spacing-char)
+ (fn [[{:keys [input-text]} {:keys [params current-param-position cursor-in-the-end?]}]]
+   (when (and cursor-in-the-end? (string/ends-with? (or input-text "") chat.constants/spacing-char))
      (get-in params [current-param-position :placeholder]))))
 
 (re-frame/reg-sub

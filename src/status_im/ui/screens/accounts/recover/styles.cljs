@@ -3,8 +3,7 @@
   (:require [status-im.ui.components.colors :as colors]))
 
 (def screen-container
-  {:flex             1
-   :background-color colors/white})
+  {:flex 1})
 
 (defstyle inputs-container
   {:margin  16
@@ -25,8 +24,7 @@
 
 (def sign-you-in
   {:margin-top     16
-   :font-size      13
-   :color          colors/black})
+   :font-size      13})
 
 (def recover-release-warning
   {:margin-top     16

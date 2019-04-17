@@ -3,20 +3,10 @@
   (:require [status-im.ui.components.colors :as colors]))
 
 (def create-account-view
-  {:flex               1
-   :background-color colors/white})
+  {:flex 1})
 
 (def account-creating-view
-  {:flex               1
-   :padding-horizontal 14})
-
-(def account-creating-logo-container
-  {:margin-top  37
-   :align-items :center})
-
-(def account-creating-logo
-  {:size      82
-   :icon-size 34})
+  {:flex 1})
 
 (def account-creating-indicatior
   {:flex            1
@@ -25,18 +15,12 @@
    :margin-bottom   100})
 
 (def account-creating-text
-  {:font-size      14
-   :line-height    21
-   :letter-spacing -0.2
-   :text-align     :center
-   :color          colors/black
-   :margin-top     16})
+  {:font-size   14
+   :text-align  :center
+   :margin-top  16})
 
 (def logo-container
-  {:position    :absolute
-   :top         37
-   :left        0
-   :right       0
+  {:margin-top  16
    :align-items :center})
 
 (def logo
@@ -45,15 +29,11 @@
 
 (defstyle input-container
   {:margin-horizontal 16
-   :margin-top        105
-   :android           {:padding-top 13
-                       :margin-top  92}})
+   :margin-top        16})
 
 (def input-description
-  {:font-size      14
-   :letter-spacing -0.2
-   :color          colors/gray
-   :line-height    21})
+  {:font-size   14
+   :color       colors/gray})
 
 (def bottom-container
   {:flex-direction    :row

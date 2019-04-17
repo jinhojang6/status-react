@@ -65,11 +65,12 @@
   "Sends the payload using to dst"
   [{:keys [db] :as cofx} dst success-event payload]
   (let [{:keys [web3]} db]
-    {:shh/send-direct-message [{:web3 web3
-                                :success-event success-event
-                                :src     (accounts.db/current-public-key cofx)
-                                :dst     dst
-                                :payload payload}]}))
+    {:shh/send-direct-message [{:web3           web3
+                                :success-event  success-event
+                                :src            (accounts.db/current-public-key cofx)
+                                :dst            dst
+                                :topics         (:mailserver/topics db)
+                                :payload        payload}]}))
 
 (fx/defn send-with-pubkey
   "Sends the payload using asymetric key (account `:public-key` in db) and fixed discovery topic"
@@ -81,13 +82,18 @@
                              chat-id
                              success-event
                              payload)
-        {:shh/post [{:web3          web3
-                     :success-event success-event
-                     :message       (merge {:sig     (accounts.db/current-public-key cofx)
-                                            :pubKey  chat-id
-                                            :payload payload
-                                            :topic   (transport.topic/public-key->discovery-topic-hash chat-id)}
-                                           whisper-opts)}]}))))
+        (let [partitioned-topic-hash (transport.topic/public-key->discovery-topic-hash chat-id)
+              topics                 (db :mailserver/topics)
+              topic-hash             (if (contains? topics partitioned-topic-hash)
+                                       partitioned-topic-hash
+                                       transport.topic/discovery-topic-hash)]
+          {:shh/post [{:web3          web3
+                       :success-event success-event
+                       :message       (merge {:sig     (accounts.db/current-public-key cofx)
+                                              :pubKey  chat-id
+                                              :payload payload
+                                              :topic   topic-hash}
+                                             whisper-opts)}]})))))
 
 (defrecord Message [content content-type message-type clock-value timestamp]
   StatusMessage
@@ -107,7 +113,7 @@
         (fx/merge cofx
                   (send-direct-message current-public-key nil this)
                   (send-with-pubkey params)))))
-  (receive [this chat-id signature _ cofx]
+  (receive [this chat-id signature timestamp cofx]
     {:chat-received-message/add-fx
      [(assoc (into {} this)
              :old-message-id (transport.utils/old-message-id this)
@@ -115,9 +121,11 @@
                           signature
                           (.-payload (:js-obj cofx)))
              :chat-id chat-id
+             :whisper-timestamp timestamp
              :raw-payload-hash (transport.utils/sha3
                                 (.-payload (:js-obj cofx)))
              :from signature
+             :dedup-id (:dedup-id cofx)
              :js-obj (:js-obj cofx))]})
   (validate [this]
     (if (spec/valid? :message/message this)

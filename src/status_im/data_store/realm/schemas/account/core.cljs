@@ -6,6 +6,7 @@
             [status-im.data-store.realm.schemas.account.contact :as contact]
             [status-im.data-store.realm.schemas.account.message :as message]
             [status-im.data-store.realm.schemas.account.user-status :as user-status]
+            [status-im.data-store.realm.schemas.account.contact-device-info :as contact-device-info]
             [status-im.data-store.realm.schemas.account.local-storage :as local-storage]
             [status-im.data-store.realm.schemas.account.mailserver :as mailserver]
             [status-im.data-store.realm.schemas.account.browser :as browser]
@@ -413,6 +414,68 @@
           dapp-permissions/v9
           contact-recovery/v1])
 
+(def v37 [chat/v14
+          transport/v8
+          contact/v5
+          message/v9
+          mailserver/v11
+          mailserver-topic/v1
+          user-status/v2
+          membership-update/v1
+          installation/v3
+          local-storage/v1
+          browser/v8
+          dapp-permissions/v9
+          contact-device-info/v1
+          contact-recovery/v1])
+
+(def v38 v37)
+
+(def v39 [chat/v14
+          transport/v8
+          contact/v6
+          message/v9
+          mailserver/v11
+          mailserver-topic/v1
+          user-status/v2
+          membership-update/v1
+          installation/v3
+          local-storage/v1
+          browser/v8
+          dapp-permissions/v9
+          contact-device-info/v1
+          contact-recovery/v1])
+
+(def v40 [chat/v14
+          transport/v8
+          contact/v7
+          message/v9
+          mailserver/v11
+          mailserver-topic/v1
+          user-status/v2
+          membership-update/v1
+          installation/v3
+          local-storage/v1
+          browser/v8
+          dapp-permissions/v9
+          contact-device-info/v1
+          contact-recovery/v1])
+
+(def v41 [chat/v14
+          transport/v8
+          contact/v7
+          message/v10
+          mailserver/v11
+          mailserver-topic/v2
+          user-status/v2
+          membership-update/v1
+          installation/v3
+          local-storage/v1
+          browser/v8
+          dapp-permissions/v9
+          contact-device-info/v1
+          contact-recovery/v1])
+
 ;; put schemas ordered by version
 (def schemas [{:schema        v1
                :schemaVersion 1
@@ -521,4 +584,19 @@
                :migration     migrations/v35}
               {:schema        v36
                :schemaVersion 36
+               :migration     (constantly nil)}
+              {:schema        v37
+               :schemaVersion 37
+               :migration     (constantly nil)}
+              {:schema        v38
+               :schemaVersion 38
+               :migration     migrations/v38}
+              {:schema        v39
+               :schemaVersion 39
+               :migration     (constantly nil)}
+              {:schema        v40
+               :schemaVersion 40
+               :migration     migrations/v40}
+              {:schema        v41
+               :schemaVersion 41
                :migration     (constantly nil)}])

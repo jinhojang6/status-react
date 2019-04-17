@@ -12,7 +12,7 @@
 
   [flat-list {:data [{:title  \"\" :subtitle \"\"}] :render-fn render}]
 
-  [section-list {:sections [{:title :key :unik :data {:title  \"\" :subtitle \"\"}}] :render-fn render}]
+  [section-list {:sections [{:title \"\" :key :unik :data {:title  \"\" :subtitle \"\"}}] :render-fn render}]
 
   or with a per-section `render-fn`
 
@@ -87,16 +87,19 @@
   [& children]
   (into [react/view {:style styles/item-content-view}] (keep identity children)))
 
-(defn item-checkbox
-  [{:keys [style] :as props}]
-  [react/view {:style (merge style styles/item-checkbox)}
-   [checkbox/checkbox props]])
+(defn list-item-with-checkbox
+  [{:keys [on-value-change style checked?] :as props} item]
+  [react/touchable-highlight {:on-press #(on-value-change (not checked?))}
+   (conj item
+         [react/view {:style (merge style styles/item-checkbox)}
+          [checkbox/checkbox props]])])
 
-(defn list-item-with-checkbox [{:keys [on-value-change checked? plain-checkbox?] :as props} item]
-  (let [handler  #(on-value-change (not checked?))
-        checkbox [(if plain-checkbox? checkbox/plain-checkbox item-checkbox) props]
-        item     (conj item checkbox)]
-    [touchable-item handler item]))
+(defn list-item-with-radio-button
+  [{:keys [on-value-change style checked?] :as props} item]
+  [react/touchable-highlight {:on-press #(on-value-change (not checked?))}
+   (conj item
+         [react/view {:style (merge style styles/item-checkbox)}
+          [checkbox/radio-button props]])])
 
 (def item-icon-forward
   [item-icon {:icon      :main-icons/next
@@ -104,33 +107,48 @@
               :icon-opts {:color colors/white}}])
 
 (defn big-list-item
-  [{:keys [text text-color value action-fn active? destructive? hide-chevron?
-           accessory-value text-color
+  [{:keys [style text text-color subtext value action-fn active? destructive? hide-chevron?
+           accessory-value text-color new?
            accessibility-label icon icon-color image-source icon-content]
     :or   {icon-color colors/blue
            text-color colors/black
            value ""
-           active? true}}]
+           active? true
+           style {}}}]
   {:pre [(or icon image-source)
          (and action-fn text)
          (or (nil? accessibility-label) (keyword? accessibility-label))]}
   [react/touchable-highlight
-   (cond-> {:on-press action-fn
-            :accessibility-label accessibility-label
-            :disabled (not active?)})
-   [react/view styles/settings-item
+   {:on-press action-fn
+    :style style
+    :accessibility-label accessibility-label
+    :disabled (not active?)}
+   [react/view (styles/settings-item subtext)
     (if icon
-      [react/view (styles/settings-item-icon icon-color)
+      [react/view (styles/settings-item-icon icon-color subtext)
        [vector-icons/icon icon {:color icon-color}]]
       [react/image {:source {:uri image-source}
                     :style   styles/big-item-image}])
-    [react/text {:style (styles/settings-item-text text-color)
-                 :number-of-lines 1}
-     text]
+    (if subtext
+      [react/view {:style styles/settings-item-text-container}
+       [react/view {:style styles/settings-item-main-text-container}
+        (when new?
+          [react/view {:style styles/new-label}
+           [react/text {:style styles/new-label-text}
+            (string/upper-case (i18n/label :t/new))]])
+        [react/text {:style (styles/settings-item-text text-color)}
+         text]]
+       [react/view {:style {:margin-top 2
+                            :justify-content :flex-start}}
+        [react/text {:style styles/settings-item-subtext
+                     :number-of-lines 2}
+         subtext]]]
+      [react/text {:style (styles/settings-item-text text-color)
+                   :number-of-lines 1}
+       text])
     (when accessory-value
       [react/text {:style           styles/settings-item-value
-                   :number-of-lines 1
-                   :uppercase?      true}
+                   :number-of-lines 1}
        (str accessory-value)])
     (when-not hide-chevron?
       [vector-icons/icon :main-icons/next {:color (colors/alpha colors/gray 0.4)}])]])
@@ -153,13 +171,14 @@
 (def default-footer [react/view styles/list-header-footer-spacing])
 
 (defn- base-list-props
-  [{:keys [key-fn render-fn empty-component header separator default-separator?]}]
+  [{:keys [key-fn render-fn empty-component header footer separator default-separator?]}]
   (let [separator (or separator (when (and platform/ios? default-separator?) default-separator))]
     (merge (when key-fn          {:keyExtractor (wrap-key-fn key-fn)})
            (when render-fn       {:renderItem (wrap-render-fn render-fn)})
            (when separator       {:ItemSeparatorComponent (fn [] (reagent/as-element separator))})
            (when empty-component {:ListEmptyComponent (fn [] (reagent/as-element empty-component))})
-           (when header          {:ListHeaderComponent (fn [] (reagent/as-element header))}))))
+           (when header          {:ListHeaderComponent (fn [] (reagent/as-element header))})
+           (when footer          {:ListFooterComponent (fn [] (reagent/as-element footer))}))))
 
 ;; Workaround an issue in reagent that does not consider JS array as JS value
 ;; This forces clj <-> js serialization and breaks clj semantic
@@ -215,12 +234,16 @@
 
 (defn section-list
   "A wrapper for SectionList.
+   To render something on empty sections, use renderSectionFooter and conditionaly
+   render on empty data
    See https://facebook.github.io/react-native/docs/sectionlist.html"
-  [{:keys [sections render-section-header-fn] :as props
+  [{:keys [sections render-section-header-fn render-section-footer-fn] :as props
     :or {render-section-header-fn default-render-section-header}}]
   [section-list-class
    (merge (base-list-props props)
           props
+          (when render-section-footer-fn
+            {:renderSectionFooter (wrap-render-section-header-fn render-section-footer-fn)})
           {:sections            (clj->js (map wrap-per-section-render-fn sections))
            :renderSectionHeader (wrap-render-section-header-fn render-section-header-fn)})])
 

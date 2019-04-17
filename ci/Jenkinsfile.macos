@@ -22,13 +22,12 @@ pipeline {
   }
 
   environment {
-    BUILD_PLATFORM = 'macos'
+    TARGET_OS = 'macos'
+    CI_ENVIRONMENT = 'jenkins'
     LANG = 'en_US.UTF-8'
     LANGUAGE = 'en_US.UTF-8'
     LC_ALL = 'en_US.UTF-8'
-    QT_PATH = '/usr/local/opt/qt'
-    PATH = "/usr/local/opt/qt/bin:${env.PATH}"
-    MACDEPLOYQT = '/usr/local/opt/qt/bin/macdeployqt'
+    NIX_CONF_DIR = "${env.WORKSPACE}/nix"
     VERBOSE_LEVEL = '3'
   }
 
@@ -39,31 +38,28 @@ pipeline {
           /* Necessary to load methods */
           desktop = load 'ci/desktop.groovy'
           cmn     = load 'ci/common.groovy'
-          print "Running ${cmn.getBuildType()} build!"
-          cmn.abortPreviousRunningBuilds()
-          /* Read the valid NodeJS version */
-          env.NODE_VERSION = cmn.getToolVersion('node')
+          btype   = cmn.utils.getBuildType()
+          print "Running ${btype} build!"
+          cmn.ci.abortPreviousRunningBuilds()
           /* Cleanup and Prep */
-          nvm(env.NODE_VERSION) {
-            desktop.prepDeps()
-          }
+          cmn.prep(btype)
         }
       }
     }
     stage('Lint') {
-      steps { nvm(env.NODE_VERSION) {
-        script { cmn.runLint() }
-      } }
+      steps {
+        script { cmn.utils.nix_sh('lein cljfmt check') }
+      }
     }
     stage('Tests') {
-      steps { nvm(env.NODE_VERSION) {
-        script { cmn.runTests() }
-      } }
+      steps {
+        script { cmn.utils.nix_sh('lein test-cljs') }
+      }
     }
     stage('Build') {
-      steps { nvm(env.NODE_VERSION) {
+      steps {
         script { desktop.buildClojureScript() }
-      } }
+      }
     }
     stage('Compile') {
       steps {
@@ -71,9 +67,9 @@ pipeline {
       }
     }
     stage('Bundle') {
-      steps { nvm(env.NODE_VERSION) {
-        script { dmg = desktop.bundleMacOS(cmn.getBuildType()) }
-      } }
+      steps {
+        script { dmg = desktop.bundleMacOS(btype) }
+      }
     }
     stage('Archive') {
       steps {
@@ -82,17 +78,17 @@ pipeline {
     }
     stage('Upload') {
       steps {
-        script { env.PKG_URL = cmn.uploadArtifact(dmg) }
+        script { env.PKG_URL = cmn.utils.uploadArtifact(dmg) }
       }
     }
     stage('Cleanup') {
       steps {
-        script { cmn.clean() }
+        sh 'make clean'
       }
     }
   }
   post {
-    failure { script { load('ci/common.groovy').notifyPRFailure() } }
-    success { script { load('ci/common.groovy').notifyPRSuccess() } }
+    success { script { load('ci/common.groovy').notifyPR(true) } }
+    failure { script { load('ci/common.groovy').notifyPR(false) } }
   }
 }

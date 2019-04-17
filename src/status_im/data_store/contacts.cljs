@@ -4,14 +4,24 @@
             [status-im.data-store.realm.core :as core]
             [clojure.set :as clojure.set]))
 
-(defn- normalize-contact [contact]
+(defn- deserialize-contact [contact]
   (-> contact
-      (update :tags #(into #{} %))))
+      (update :tags #(into #{} %))
+      (update :system-tags
+              #(reduce (fn [acc s]
+                         (conj acc (keyword (subs s 1))))
+                       #{}
+                       %))))
+
+(defn- serialize-contact [contact]
+  (-> contact
+      (update :device-info #(or (vals %) []))
+      (update :system-tags #(mapv str %))))
 
 (re-frame/reg-cofx
  :data-store/get-all-contacts
  (fn [coeffects _]
-   (assoc coeffects :all-contacts (map normalize-contact
+   (assoc coeffects :all-contacts (map deserialize-contact
                                        (-> @core/account-realm
                                            (core/get-all :contact)
                                            (core/all-clj :contact))))))
@@ -22,7 +32,7 @@
   (fn [realm]
     (core/create realm
                  :contact
-                 contact
+                 (serialize-contact contact)
                  true)))
 
 (defn save-contacts-tx
@@ -68,7 +78,7 @@
   "Returns tx function for deleting user messages"
   [{:keys [public-key] :as contact} messages-ids]
   (fn [realm]
-    (core/create realm :contact contact true)
+    (core/create realm :contact (serialize-contact contact) true)
     (when-let [user-messages
                (get-messages-by-messages-ids messages-ids)]
       (core/delete realm user-messages))
@@ -87,23 +97,3 @@
   [public-key]
   (fn [realm]
     (core/delete realm (get-contact-by-id public-key realm))))
-
-(defn add-contact-tag-tx
-  "Returns tx function for adding chat contacts"
-  [public-key tag]
-  (fn [realm]
-    (let [contact       (get-contact-by-id public-key realm)
-          existing-tags (object/get contact "tags")]
-      (aset contact "tags"
-            (clj->js (into #{} (concat tag
-                                       (core/list->clj existing-tags))))))))
-
-(defn remove-contact-tag-tx
-  "Returns tx function for removing chat contacts"
-  [public-key tag]
-  (fn [realm]
-    (let [contact       (get-contact-by-id public-key realm)
-          existing-tags (object/get contact "tags")]
-      (aset contact "tags"
-            (clj->js (remove (into #{} tag)
-                             (core/list->clj existing-tags)))))))

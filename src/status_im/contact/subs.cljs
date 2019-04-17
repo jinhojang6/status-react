@@ -9,6 +9,11 @@
    (:contacts/dapps db)))
 
 (re-frame/reg-sub
+ ::contacts
+ (fn [db]
+   (get db :contacts/contacts)))
+
+(re-frame/reg-sub
  ::query-current-chat-contacts
  :<- [:chats/current-chat]
  :<- [:contacts/contacts]
@@ -17,14 +22,15 @@
 
 (re-frame/reg-sub
  :contacts/contacts
- (fn [db]
-   (get db :contacts/contacts)))
+ :<- [::contacts]
+ (fn [contacts]
+   (contact.db/enrich-contacts contacts)))
 
 (re-frame/reg-sub
  :contacts/active
  :<- [:contacts/contacts]
  (fn [contacts]
-   (contact.db/active contacts)))
+   (contact.db/get-active-contacts contacts)))
 
 (re-frame/reg-sub
  :contacts/active-count
@@ -37,8 +43,8 @@
  :<- [:contacts/contacts]
  (fn [contacts]
    (->> contacts
-        (filter (fn [[_ {:keys [blocked?]}]]
-                  blocked?))
+        (filter (fn [[_ contact]]
+                  (contact.db/blocked? contact)))
         (contact.db/sort-contacts))))
 
 (re-frame/reg-sub
@@ -57,7 +63,10 @@
  :<- [:contacts/contacts]
  :<- [:contacts/current-contact-identity]
  (fn [[contacts identity]]
-   (contacts identity)))
+   (or (contacts identity)
+       (-> identity
+           contact.db/public-key->new-contact
+           contact.db/enrich-contact))))
 
 (re-frame/reg-sub
  :contacts/all-dapps
@@ -67,16 +76,6 @@
    (map (fn [m] (update m :data
                         #(contact.db/filter-dapps % dev-mode?)))
         dapps)))
-
-(re-frame/reg-sub
- :contacts/contact-by-identity
- :<- [:contacts/contacts]
- :<- [:chats/current-chat]
- (fn [[all-contacts {:keys [contacts]}] [_ identity]]
-   (let [identity' (or identity (first contacts))]
-     (or
-      (get all-contacts identity')
-      (contact.db/public-key->new-contact identity')))))
 
 (re-frame/reg-sub
  :contacts/dapps-by-name
@@ -105,9 +104,7 @@
  :contacts/all-contacts-not-in-current-chat
  :<- [::query-current-chat-contacts remove]
  (fn [contacts]
-   (->> contacts
-        (remove :dapp?)
-        (sort-by (comp clojure.string/lower-case :name)))))
+   (sort-by (comp clojure.string/lower-case :name) contacts)))
 
 (re-frame/reg-sub
  :contacts/current-chat-contacts

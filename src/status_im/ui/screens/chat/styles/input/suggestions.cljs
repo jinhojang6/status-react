@@ -15,15 +15,10 @@
    :align-items         :center
    :height              item-height
    :padding-horizontal  14
-   :border-bottom-color colors/gray-light
-   :border-bottom-width border-height})
-
-(def item-suggestion-name
-  {:color     colors/black
-   :font-size 15})
+   :border-top-color colors/gray-light
+   :border-top-width border-height})
 
 (def item-suggestion-description
   {:flex        1
-   :font-size   15
    :margin-left 10
    :color       colors/gray})

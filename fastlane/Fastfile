@@ -23,6 +23,46 @@ def unlock_keychain_if_needed
     end
 end
 
+def curl_upload(url, file, user, conn_timeout=5, timeout=60, retries=3)
+    begin
+        return sh(
+            "curl",
+            "--fail",
+            "--silent",
+            "--user", user,
+            "--request", "POST",
+            "--header", "Content-Type: application/octet-stream",
+            "--data-binary", "@../#{file}",         # `fastlane` is the cwd so we go one folder up
+            # we retry few times if upload doesn't succeed in sensible time
+            "--retry-connrefused",                  # consider ECONNREFUSED as error too retry
+            "--connect-timeout", conn_timeout.to_s, # max time in sec. for establishing connection 
+            "--max-time", timeout.to_s,             # max time in sec. for whole transfer to take
+            "--retry", retries.to_s,                # number of retries to attempt
+            "--retry-max-time", timeout.to_s,       # same as --max-time but for retries
+            "--retry-delay", "0",                   # an exponential backoff algorithm in sec.
+            url
+        )
+    rescue => error
+        UI.error "Error: #{error}"
+        raise
+    end
+end
+
+def retry_curl_upload(url, file, user, conn_timeout=5, timeout=60, retries=3)
+    # since curl doesn't retry on connection and operation timeouts we roll our own
+    try = 0
+    begin
+        return curl_upload(url, file, user, conn_timeout, timeout, retries)
+    rescue => error
+        try += 1
+        if try <= retries
+            UI.important "Warning: Retrying cURL upload! (attempt #{try}/#{retries})"
+            retry
+        else
+            raise
+        end
+    end
+end
 
 # uploads `file` to sauce labs (overwrites if there is anoter file from the
 # same commit)
@@ -31,22 +71,13 @@ def upload_to_saucelabs(file)
     username = ENV["SAUCE_USERNAME"]
     unique_name = ENV["SAUCE_LABS_NAME"]
 
-    url = "https://saucelabs.com/rest/v1/storage/" + username + '/' + unique_name + "?overwrite=true"
+    url = "https://saucelabs.com/rest/v1/storage/#{username}/#{unique_name}?overwrite=true"
 
-    upload_result = sh(
-        "curl",
-        "-u", username + ':' + key,
-        "-X", "POST",
-        "-H", "Content-Type: application/octet-stream",
-        url,
-        # this command has `status-react/fastlane` as cwd
-        # so we need to jump outside this folder to get a file
-        "--data-binary", "@" + "../" + file
-    )
+    upload_result = retry_curl_upload(url, file, "#{username}:#{key}")
 
     # fail the lane if upload fails
     UI.user_error!(
-        "failed to upload file to saucelabs: " + upload_result
+        "failed to upload file to saucelabs despite retries: #{upload_result}"
     ) unless upload_result.include? "filename"
 end
 
@@ -70,7 +101,12 @@ def build_ios_adhoc(readonly)
         configuration: "Release",
         clean: true,
         export_method: "ad-hoc",
-        output_directory: "status-adhoc"
+        # Temporary fix for Xcode 10.1
+        xcargs: "-UseModernBuildSystem=N",
+        output_directory: "status-adhoc",
+        export_options: {
+            "UseModernBuildSystem": "N"
+        }
     )
 end
 
@@ -97,7 +133,8 @@ def build_ios_e2e
         destination: "generic/platform=iOS Simulator",
         # 2. fixing compilations issues as stated in https://stackoverflow.com/a/20505258
         #    it looks like i386 isn't supported by React Native
-        xcargs: "ARCHS=\"x86_64\" ONLY_ACTIVE_ARCH=NO",
+        # UseModernBuildSystem: Temporary fix for Xcode 10.1
+        xcargs: "ARCHS=\"x86_64\" ONLY_ACTIVE_ARCH=NO -UseModernBuildSystem=N",
         # 3. directory where to up StatusIm.app
         derived_data_path: "status-e2e",
         output_name: "StatusIm.app",
@@ -109,7 +146,10 @@ def build_ios_e2e
         # Simulator apps can't be archived...
         skip_archive: true,
         # ...and we don't need an .ipa file for them, because we use .app directly
-        skip_package_ipa: true
+        skip_package_ipa: true,
+        export_options: {
+            "UseModernBuildSystem": "N"
+        }
     )
 
     zip(
@@ -176,7 +216,10 @@ platform :ios do
         clean: true,
         export_method: "app-store",
         output_directory: "status_appstore",
+        # Temporary fix for Xcode 10.1
+        xcargs: "-UseModernBuildSystem=N",
         export_options: {
+            "UseModernBuildSystem": "N",
             "combileBitcode": true,
             "uploadBitcode": false,
             "ITSAppUsesNonExemptEncryption": false
@@ -191,7 +234,7 @@ platform :ios do
   desc "uses custom plugin, installed via"
   desc "`sudo get install fastlane-plugin-clean_testflight_testers`"
   lane :clean do
-    clean_testflight_testers
+    clean_testflight_testers(username: ENV["FASTLANE_APPLE_ID"])
   end
 
   desc "`fastlane ios upload-diawi` - upload .ipa to diawi"
@@ -202,7 +245,8 @@ platform :ios do
   desc "---"
   desc "Output: writes `fastlane/diawi.out` file url of the uploded file"
   lane :upload_diawi do
-    upload_to_diawi("status-adhoc/StatusIm.ipa")
+    ipa = ENV["DIAWI_IPA"] || "status-adhoc/StatusIm.ipa"
+    upload_to_diawi(ipa)
   end
 
   desc "`fastlane ios saucelabs` - upload .app to sauce labs"
@@ -226,12 +270,15 @@ end
 
 
 platform :android do
+  # Optional env variables
+  APK_PATH = ENV["APK_PATH"] || "android/app/build/outputs/apk/release/app-release.apk"
+
   desc "Deploy a new internal build to Google Play"
   desc "expects GOOGLE_PLAY_JSON_KEY environment variable"
   lane :nightly do
     upload_to_play_store(
       track: "internal",
-      apk: "android/app/build/outputs/apk/release/app-release.apk",
+      apk: APK_PATH,
       json_key_data: ENV["GOOGLE_PLAY_JSON_KEY"]
     )
 
@@ -242,7 +289,7 @@ platform :android do
   lane :release do
     upload_to_play_store(
       track: "alpha",
-      apk: "android/app/build/outputs/apk/release/app-release.apk",
+      apk: APK_PATH,
       json_key_data: ENV["GOOGLE_PLAY_JSON_KEY"]
     )
   end
@@ -266,7 +313,7 @@ platform :android do
   desc "---"
   desc "Output: writes `fastlane/diawi.out` file url of the uploded file"
   lane :upload_diawi do
-    upload_to_diawi("android/app/build/outputs/apk/release/app-release.apk")
+    upload_to_diawi(APK_PATH)
   end
 
   desc "`fastlane android saucelabs` - upload .apk to sauce labs"
@@ -276,8 +323,6 @@ platform :android do
   desc "expects to have a saucelabs destination name as SAUCE_LABS_NAME env variable"
   desc "will fails if file isn't there"
   lane :saucelabs do
-    upload_to_saucelabs(
-        "android/app/build/outputs/apk/release/app-release.apk"
-    )
+    upload_to_saucelabs(APK_PATH)
   end
 end

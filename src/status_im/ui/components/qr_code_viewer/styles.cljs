@@ -25,10 +25,8 @@
    :ios            {:align-items :center}
    :android        {:margin-left 15}})
 
-(defstyle name-text
-  {:color     colors/black
-   :font-size 17
-   :ios       {:letter-spacing -0.2}})
+(def name-text
+  {:font-size 17})
 
 (def address-text
   {:color     colors/white
@@ -41,10 +39,6 @@
 (def account-toolbar
   {:background-color colors/white})
 
-(def qr-code
-  {:flex-grow       1
-   :justify-content :center})
-
 (def footer
   {:flex-direction   :row
    :justify-content  :center})
@@ -53,23 +47,15 @@
   {:flex-grow      1
    :align-items    :center})
 
-(def hash-value-type
-  {:color          colors/black
-   :padding-bottom 5})
-
 (def hash-value-text
-  {:color              colors/black
-   :align-self         :stretch
+  {:align-self         :stretch
    :border-color       colors/gray-light
    :border-width       1
    :margin-horizontal  16
    :padding-horizontal 8
    :padding-vertical   6
    :border-radius      8
-   :text-align         :center
-   :font-size          15
-   :letter-spacing     -0.2
-   :line-height        20})
+   :text-align         :center})
 
 (def done-button-text
   {:color colors/white})

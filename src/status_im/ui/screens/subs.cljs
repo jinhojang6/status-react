@@ -5,6 +5,7 @@
             status-im.contact.subs
             status-im.search.subs
             status-im.mailserver.subs
+            status-im.tribute-to-talk.subs
             status-im.ui.components.connectivity.subs
             status-im.ui.screens.accounts.subs
             status-im.ui.screens.chat.stickers.subs
@@ -51,6 +52,8 @@
 (reg-sub :sync-state :sync-state)
 (reg-sub :network-status :network-status)
 (reg-sub :peers-count :peers-count)
+(reg-sub :about-app/node-info :node-info)
+(reg-sub :peers-summary :peers-summary)
 (reg-sub :node-status :node/status)
 
 (reg-sub :disconnected?

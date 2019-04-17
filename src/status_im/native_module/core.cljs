@@ -49,8 +49,23 @@
 (defn sign-message [rpcParams callback]
   (native-module/sign-message rpcParams callback))
 
+(defn sign-typed-data [data password callback]
+  (native-module/sign-typed-data data password callback))
+
 (defn send-transaction [rpcParams password callback]
   (native-module/send-transaction rpcParams password callback))
+
+(defn hash-transaction [rpcParams callback]
+  (native-module/hash-transaction rpcParams callback))
+
+(defn hash-message [message callback]
+  (native-module/hash-message message callback))
+
+(defn hash-typed-data [data callback]
+  (native-module/hash-typed-data data callback))
+
+(defn send-transaction-with-signature [rpcParams sig callback]
+  (native-module/send-transaction-with-signature rpcParams sig callback))
 
 (defn send-data-notification [m callback]
   (native-module/send-data-notification m callback))
@@ -87,3 +102,7 @@
 (def update-mailservers native-module/update-mailservers)
 
 (def rooted-device? native-module/rooted-device?)
+
+(def chaos-mode-update native-module/chaos-mode-update)
+
+(def get-nodes-from-contract native-module/get-nodes-from-contract)

@@ -16,6 +16,12 @@
           :height        40
           :border-radius 20}))
 
+(defn default-chat-icon-chat-toolbar [color]
+  (merge (default-chat-icon color)
+         {:width         36
+          :height        36
+          :border-radius 18}))
+
 (defn default-chat-icon-profile [color size]
   (merge (default-chat-icon color)
          {:width         size
@@ -37,8 +43,8 @@
 (def default-chat-icon-text
   {:color       colors/white
    :font-size   20
-   :opacity     0.8
-   :line-height 24})
+   :font-weight "700"
+   :opacity     0.8})
 
 (def message-status-icon-text
   {:margin-top -2
@@ -55,6 +61,12 @@
   (merge chat-icon
          {:width  40
           :height 40
+          :margin 0}))
+
+(def chat-icon-chat-toolbar
+  (merge chat-icon
+         {:width  36
+          :height 36
           :margin 0}))
 
 (defn custom-size-icon [size]
@@ -154,6 +166,7 @@
          {:top    8
           :width  4
           :height 4}))
+
 (def online-dot-left-profile
   (merge online-dot-profile {:left 5}))
 (def online-dot-right-profile
@@ -166,6 +179,10 @@
 (def container-chat-list
   {:width  40
    :height 40})
+
+(def container-chat-toolbar
+  {:width  36
+   :height 36})
 
 (def container-menu-item
   {:width  24

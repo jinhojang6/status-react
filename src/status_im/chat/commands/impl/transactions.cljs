@@ -9,11 +9,11 @@
             [status-im.ui.components.react :as react]
             [status-im.ui.components.icons.vector-icons :as vector-icons]
             [status-im.ui.components.colors :as colors]
-            [status-im.ui.components.chat-preview :as chat-preview]
             [status-im.ui.components.list.views :as list]
             [status-im.ui.components.animation :as animation]
             [status-im.ui.components.svgimage :as svgimage]
             [status-im.i18n :as i18n]
+            [status-im.contact.db :as db.contact]
             [status-im.constants :as constants]
             [status-im.utils.ethereum.core :as ethereum]
             [status-im.utils.ethereum.tokens :as tokens]
@@ -38,8 +38,7 @@
     [react/view transactions-styles/asset-main
      [react/image {:source (-> asset :icon :source)
                    :style  transactions-styles/asset-icon}]
-     [react/text {:style transactions-styles/asset-symbol}
-      (wallet.utils/display-symbol asset)]
+     [react/text (wallet.utils/display-symbol asset)]
      [react/text {:style transactions-styles/asset-name} name]]
     ;;TODO(goranjovic) : temporarily disabled to fix https://github.com/status-im/status-react/issues/4963
     ;;until the resolution of https://github.com/status-im/status-react/issues/4972
@@ -53,7 +52,7 @@
     [react/view transactions-styles/asset-main
      [react/image {:source (-> asset :icon :source)
                    :style  transactions-styles/asset-icon}]
-     [react/text {:style transactions-styles/asset-symbol} name]]
+     [react/text name]]
     [react/text {:style {:font-size     16
                          :color         colors/gray
                          :padding-right 14}}
@@ -83,7 +82,7 @@
 (defn personal-send-request-short-preview
   [label-key {:keys [content]}]
   (let [{:keys [amount coin]} (:params content)]
-    [chat-preview/text {}
+    [react/text {:number-of-lines 1}
      (i18n/label label-key {:amount (i18n/label-number amount)
                             :asset  (wallet.utils/display-symbol coin)})]))
 
@@ -119,7 +118,7 @@
                                          :margin-left  20
                                          :margin-right 20}
                                 :source {:uri image_url}}]
-            [react/text {} name]]])
+            [react/text name]]])
         collectible-tokens)])))
 
 (defview nft-token [{{:keys [name image_url]} :token}]
@@ -128,7 +127,7 @@
    [svgimage/svgimage {:style  {:width  100
                                 :height 100}
                        :source {:uri image_url}}]
-   [react/text {} name]])
+   [react/text name]])
 
 ;;TODO(goranjovic): currently we only allow tokens which are enabled in Manage assets here
 ;; because balances are only fetched for them. Revisit this decision with regard to battery/network consequences
@@ -183,7 +182,7 @@
     [react/touchable-highlight {:on-press #(when tx-exists?
                                              (re-frame/dispatch [:show-transaction-details tx-hash]))}
      [react/view transactions-styles/command-send-status-container
-      [vector-icons/icon (if confirmed? :main-icons/check :main-icons/more)
+      [vector-icons/icon (if confirmed? :tiny-icons/tiny-check :tiny-icons/tiny-pending)
        {:color           (if outgoing colors/blue-light colors/blue)
         :container-style (transactions-styles/command-send-status-icon outgoing)}]
       [react/view
@@ -208,13 +207,11 @@
        [react/view
         [react/view transactions-styles/command-send-amount-row
          [react/view transactions-styles/command-send-amount
-          [react/text {:style (transactions-styles/command-send-amount-text outgoing)
-                       :font  :medium}
+          [react/nested-text {:style (transactions-styles/command-send-amount-text outgoing)}
            amount
-           [react/text {:style (transactions-styles/command-amount-currency-separator outgoing)}
+           [{:style (transactions-styles/command-amount-currency-separator outgoing)}
             "."]
-           [react/text {:style (transactions-styles/command-send-currency-text outgoing)
-                        :font  :default}
+           [{:style (transactions-styles/command-send-currency-text outgoing)}
             (wallet.utils/display-symbol token)]]]]
         (when (and fiat-amount
                    platform/mobile?
@@ -296,7 +293,10 @@
   protocol/Yielding
   (yield-control [_ {{{amount :amount asset :asset} :params} :content} {:keys [db] :as cofx}]
     ;; Prefill wallet and navigate there
-    (let [recipient-contact     (get-in db [:contacts/contacts (:current-chat-id db)])
+    (let [recipient-contact     (or
+                                 (get-in db [:contacts/contacts (:current-chat-id db)])
+                                 (db.contact/public-key->new-contact (:current-chat-id db)))
+
           sender-account        (:account/account db)
           chain                 (keyword (:chain db))
           symbol-param          (keyword asset)
@@ -304,8 +304,8 @@
           {:keys [symbol decimals]} (tokens/asset-for all-tokens chain symbol-param)
           {:keys [value error]}     (wallet.db/parse-amount amount decimals)
           next-view-id              (if (:wallet-set-up-passed? sender-account)
-                                      :wallet-send-transaction-modal
-                                      :wallet-onboarding-setup)]
+                                      :wallet-send-modal-stack
+                                      :wallet-send-modal-stack-with-onboarding)]
       (fx/merge cofx
                 {:db (-> db
                          (update-in [:wallet :send-transaction]
@@ -314,7 +314,7 @@
                                     :amount-text amount
                                     :amount-error error)
                          (choose-recipient.events/fill-request-details
-                          (transaction-details recipient-contact symbol))
+                          (transaction-details recipient-contact symbol) false)
                          (update-in [:wallet :send-transaction]
                                     dissoc :id :password :wrong-password?))
                  ;; TODO(janherich) - refactor wallet send events, updating gas price
@@ -405,13 +405,11 @@
                               [react/text {:style (transactions-styles/command-request-header-text outgoing)}
                                (i18n/label :transaction-request)]]
                              [react/view transactions-styles/command-request-row
-                              [react/text {:style (transactions-styles/command-request-amount-text outgoing)
-                                           :font  :medium}
+                              [react/nested-text {:style (transactions-styles/command-request-amount-text outgoing)}
                                amount
-                               [react/text {:style (transactions-styles/command-amount-currency-separator outgoing)}
+                               [{:style (transactions-styles/command-amount-currency-separator outgoing)}
                                 "."]
-                               [react/text {:style (transactions-styles/command-request-currency-text outgoing)
-                                            :font  :default}
+                               [{:style (transactions-styles/command-request-currency-text outgoing)}
                                 asset]]]
                              (when (and platform/mobile?
                                         ;;NOTE(goranjovic) - have to hide cross network asset fiat value until we can support

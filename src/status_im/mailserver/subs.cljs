@@ -1,5 +1,7 @@
 (ns status-im.mailserver.subs
-  (:require [re-frame.core :as re-frame]))
+  (:require
+   [status-im.mailserver.core :as mailserver]
+   [re-frame.core :as re-frame]))
 
 (re-frame/reg-sub
  :mailserver/state
@@ -42,9 +44,21 @@
         (not (or connecting? connection-error? request-error?)))))
 
 (re-frame/reg-sub
+ :mailserver/connected?
+ (fn [db]
+   (let [connected? (= :connected (:mailserver/state db))
+         online?    (= :online (:network-status db))]
+     (and connected? online?))))
+
+(re-frame/reg-sub
  :mailserver/current-id
  (fn [db]
    (:mailserver/current-id db)))
+
+(re-frame/reg-sub
+ :mailserver/preferred-id
+ (fn [db]
+   (mailserver/preferred-mailserver-id {:db db})))
 
 (re-frame/reg-sub
  :mailserver/mailservers
@@ -72,7 +86,10 @@
       current-mailserver-id)))
 
 (re-frame/reg-sub
- :mailserver.edit/valid?
+ :mailserver.edit/validation-errors
  :<- [:mailserver.edit/mailserver]
  (fn [mailserver]
-   (not-any? :error (vals mailserver))))
+   (set (keep
+         (fn [[k {:keys [error]}]]
+           (when error k))
+         mailserver))))

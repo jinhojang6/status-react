@@ -18,21 +18,13 @@
    :ios                {:height 64}
    :android            {:height 56}})
 
-(defstyle log-level-item-name-text
-  {:color   colors/black
-   :ios     {:font-size      17
-             :letter-spacing -0.2
-             :line-height    20}
-   :desktop {:font-size 16}
-   :android {:font-size 16}})
+(def log-level-item-name-text
+  {:typography :title})
 
-(defstyle log-level-item-connected-text
-  {:color   colors/gray
-   :ios     {:font-size      14
-             :margin-top     6
-             :letter-spacing -0.2}
-   :android {:font-size  12
-             :margin-top 2}})
+(def log-level-item-connected-text
+  {:color      colors/gray
+   :font-size  14
+   :margin-top 6})
 
 (defn log-level-icon-container [current?]
   {:width            40
@@ -45,4 +37,5 @@
    :justify-content  :center})
 
 (defn log-level-icon [current?]
-  (hash-map (if platform/desktop? :tint-color :color) (if current? :white :gray)))
+  (hash-map (if platform/desktop? :tint-color :color)
+            (if current? :white :gray)))

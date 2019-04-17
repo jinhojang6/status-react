@@ -1,10 +1,16 @@
-cmn = load 'ci/common.groovy'
+utils = load 'ci/utils.groovy'
 
-def bundle(type = 'nightly') {
+def bundle() {
+  def btype = utils.getBuildType()
   /* Disable Gradle Daemon https://stackoverflow.com/questions/38710327/jenkins-builds-fail-using-the-gradle-daemon */
   def gradleOpt = "-PbuildUrl='${currentBuild.absoluteUrl}' -Dorg.gradle.daemon=false "
-  if (type == 'release') {
-    gradleOpt += "-PreleaseVersion='${cmn.version()}'"
+  def target = "release"
+
+  if (params.BUILD_TYPE == 'pr') {
+    /* PR builds shouldn't replace normal releases */
+    target = 'pr'
+  } else if (btype == 'release') {
+    gradleOpt += "-PreleaseVersion='${utils.getVersion('mobile_files')}'"
   }
   dir('android') {
     withCredentials([
@@ -18,36 +24,41 @@ def bundle(type = 'nightly') {
         passwordVariable: 'STATUS_RELEASE_KEY_PASSWORD'
       )
     ]) {
-      sh "./gradlew assembleRelease ${gradleOpt}"
+      utils.nix_sh "./gradlew assemble${target.capitalize()} ${gradleOpt}"
     }
   }
-  def pkg = cmn.pkgFilename(type, 'apk')
-  sh "cp android/app/build/outputs/apk/release/app-release.apk ${pkg}"
+  sh 'find android/app/build/outputs/apk'
+  def outApk = "android/app/build/outputs/apk/${target}/app-${target}.apk"
+  def pkg = utils.pkgFilename(btype, 'apk')
+  /* rename for upload */
+  sh "cp ${outApk} ${pkg}"
+  /* necessary for Fastlane */
+  env.APK_PATH = pkg
+  env.DIAWI_APK = pkg
   return pkg
 }
 
 def uploadToPlayStore(type = 'nightly') {
   withCredentials([
     string(credentialsId: "SUPPLY_JSON_KEY_DATA", variable: 'GOOGLE_PLAY_JSON_KEY'),
-    string(credentialsId: "SLACK_URL", variable: 'SLACK_URL')
   ]) {
-    sh "bundle exec fastlane android ${type}"
+    utils.nix_sh "bundle exec fastlane android ${type}"
   }
 }
 
 def uploadToSauceLabs() {
-  def changeId = cmn.changeId()
+  def changeId = utils.changeId()
   if (changeId != null) {
     env.SAUCE_LABS_NAME = "${changeId}.apk"
   } else {
-    def pkg = cmn.pkgFilename(cmn.getBuildType(), 'apk')
+    def pkg = utils.pkgFilename(utils.getBuildType(), 'apk')
     env.SAUCE_LABS_NAME = "${pkg}"
   }
   withCredentials([
     string(credentialsId: 'SAUCE_ACCESS_KEY', variable: 'SAUCE_ACCESS_KEY'),
     string(credentialsId: 'SAUCE_USERNAME', variable: 'SAUCE_USERNAME'),
   ]) {
-    sh 'bundle exec fastlane android saucelabs'
+    utils.nix_sh 'bundle exec fastlane android saucelabs'
   }
   return env.SAUCE_LABS_NAME
 }
@@ -57,7 +68,7 @@ def uploadToDiawi() {
   withCredentials([
     string(credentialsId: 'diawi-token', variable: 'DIAWI_TOKEN'),
   ]) {
-    sh 'bundle exec fastlane android upload_diawi'
+    utils.nix_sh 'bundle exec fastlane android upload_diawi'
   }
   diawiUrl = readFile "${env.WORKSPACE}/fastlane/diawi.out"
   return diawiUrl

@@ -4,6 +4,22 @@ from tests.users import chat_users
 from views.sign_in_view import SignInView
 
 
+def return_left_chat_system_message(username):
+    return "*%s* left the group" % username
+
+
+def return_created_chat_system_message(username, chat_name):
+    return "*%s* created the group *%s*" % (username, chat_name)
+
+
+def return_joined_chat_system_message(username):
+    return "*%s* has joined the group" % username
+
+
+def return_made_admin_system_message(username):
+    return "*%s* has been made admin" % username
+
+
 def create_users(driver_1, driver_2, username_1=None, username_2=None):
     device_1_sign_in, device_2_sign_in = SignInView(driver_1), SignInView(driver_2)
     if username_1 is not None and username_2 is not None:
@@ -11,12 +27,20 @@ def create_users(driver_1, driver_2, username_1=None, username_2=None):
     return device_1_sign_in.create_user(), device_2_sign_in.create_user()
 
 
-def create_and_join_group_chat(device_1_home, device_2_home, chat_name):
+def get_username(device_home, default=True):
+    device_profile_view = device_home.profile_button.click()
+    if default:
+        username = device_profile_view.default_username_text.text
+    else:
+        username = device_profile_view.username_set_by_user_text.text
+    device_home.home_button.click()
+    return username
+
+
+def create_new_group_chat(device_1_home, device_2_home, chat_name):
     # device 2: get public key and default username
     device_2_public_key = device_2_home.get_public_key()
-    device_2_profile_view = device_2_home.profile_button.click()
-    device_2_default_username = device_2_profile_view.default_username_text.text
-    device_2_home.home_button.click()
+    device_2_default_username = get_username(device_2_home)
 
     # device 1: add device 2 as contact
     device_1_chat = device_1_home.add_contact(device_2_public_key)
@@ -27,8 +51,13 @@ def create_and_join_group_chat(device_1_home, device_2_home, chat_name):
 
     # device 2: open group chat
     device_2_chat = device_2_home.get_chat_with_user(chat_name).click()
-    device_2_chat.join_chat_button.click()
 
+    return device_1_chat, device_2_chat
+
+
+def create_and_join_group_chat(device_1_home, device_2_home, chat_name):
+    device_1_chat, device_2_chat = create_new_group_chat(device_1_home, device_2_home, chat_name)
+    device_2_chat.join_chat_button.click()
     return device_1_chat, device_2_chat
 
 
@@ -51,24 +80,23 @@ class TestGroupChatMultipleDevice(MultipleDeviceTestCase):
         self.verify_no_errors()
 
     @marks.testrail_id(3993)
-    @marks.high
+    @marks.critical
     def test_send_message_in_group_chat(self):
-        message_from_device_1 = 'Hello from device 1'
-        message_from_device_2 = 'Hi there! Sent from device 2'
 
         self.create_drivers(2)
 
         device_1_home, device_2_home = create_users(self.drivers[0], self.drivers[1])
         chat_name = device_1_home.get_public_chat_name()
         device_1_chat, device_2_chat = create_and_join_group_chat(device_1_home, device_2_home, chat_name)
+        for chat in (device_1_chat, device_2_chat):
+            chat.send_message("Message from device: %s" % chat.driver.number)
 
-        device_1_chat.send_message(message_from_device_1)
-        device_2_chat.send_message(message_from_device_2)
+        for chat in (device_1_chat, device_2_chat):
+            for chat_driver in (device_1_chat, device_2_chat):
+                if not chat.chat_element_by_text(
+                        "Message from device: %s" % chat_driver.driver.number).is_element_displayed():
+                    self.errors.append("Message from device '%s' was not received" % chat_driver.driver.number)
 
-        if not device_2_chat.chat_element_by_text(message_from_device_1).is_element_displayed():
-            self.errors.append("Message with test '%s' was not received" % message_from_device_1)
-        if not device_1_chat.chat_element_by_text(message_from_device_2).is_element_displayed():
-            self.errors.append("Message with test '%s' was not received" % message_from_device_2)
         self.verify_no_errors()
 
     @marks.testrail_id(5674)
@@ -81,28 +109,24 @@ class TestGroupChatMultipleDevice(MultipleDeviceTestCase):
 
         device_1_home, device_2_home = create_users(self.drivers[0], self.drivers[1], username_1, username_2)
         chat_name = device_1_home.get_public_chat_name()
-        device_2_profile = device_2_home.profile_button.click()
-        device_2_default_username = device_2_profile.default_username_text.text
-
+        device_2_default_username = get_username(device_2_home)
         device_1_chat, device_2_chat = create_and_join_group_chat(device_1_home, device_2_home, chat_name)
-
-        admin_created_chat_system_message = "*%s* created the group *%s*" % (username_1, chat_name)
-        user2_joined_chat_system_message = "*%s* has joined the group" % device_2_default_username
-        user2_left_chat_system_message = "*%s* left the group" % device_2_default_username
 
         # device 2: delete group chat
         device_2_chat = device_2_home.get_chat_with_user(chat_name).click()
         device_2_chat.delete_chat()
 
         # device 1: check system messages in the group chat
-        if not device_1_chat.element_by_text(admin_created_chat_system_message).is_element_displayed():
-            self.errors.append("System message: '%s' in group chat is not shown" % admin_created_chat_system_message)
-        if not device_1_chat.element_by_text(user2_joined_chat_system_message).is_element_displayed():
-            self.errors.append(
-                "System message: '%s' in group chat is not shown" % user2_joined_chat_system_message)
-        if not device_1_chat.element_by_text(user2_left_chat_system_message).is_element_displayed():
-            self.errors.append(
-                "System message: '%s' in group chat is not shown" % user2_left_chat_system_message)
+
+        system_messages = [
+            return_created_chat_system_message(username_1, chat_name),
+            return_joined_chat_system_message(device_2_default_username),
+            return_left_chat_system_message(device_2_default_username)
+        ]
+        for message in system_messages:
+            if not device_1_chat.chat_element_by_text(message).is_element_displayed():
+                self.errors.append("Message with test '%s' was not received" % message)
+
         self.verify_no_errors()
 
     @marks.testrail_id(3997)
@@ -125,7 +149,8 @@ class TestGroupChatMultipleDevice(MultipleDeviceTestCase):
 
         # device_1: check if chat is was deleted
         if device_1_home.element_by_text(chat_name).is_element_displayed():
-            self.errors.append("Public chat '%s' is shown, but the chat has been deleted" % chat_name)
+            self.errors.append("Group chat '%s' is shown, but the chat has been deleted" % chat_name)
+
         self.verify_no_errors()
 
     @marks.testrail_id(3998)
@@ -144,9 +169,7 @@ class TestGroupChatMultipleDevice(MultipleDeviceTestCase):
 
         # device 2: get public key and default username
         device_2_public_key = device_2_home.get_public_key()
-        device_2_profile_view = device_2_home.profile_button.click()
-        device_2_default_username = device_2_profile_view.default_username_text.text
-        device_2_home.home_button.click()
+        device_2_default_username = get_username(device_2_home)
 
         # device 1: add contacts
         device_1_home.add_contact(chat_member['public_key'])
@@ -166,7 +189,138 @@ class TestGroupChatMultipleDevice(MultipleDeviceTestCase):
         # device 2: open the chat and check messages
         device_2_chat = device_2_home.get_chat_with_user(chat_name).click()
         device_2_chat.join_chat_button.click()
-        if not device_2_chat.chat_element_by_text(message_for_device_2).is_element_displayed():
-            self.errors.append('Message that was sent after device 2 has joined is not visible')
+        if device_2_chat.chat_element_by_text(message_for_device_2).is_element_displayed():
+            self.errors.append('Message that was sent after device 2 has joined is visible')
+        self.verify_no_errors()
+
+    @marks.testrail_id(5756)
+    @marks.high
+    def test_decline_invitation_to_group_chat(self):
+            self.create_drivers(2)
+            message_for_device_2 = 'This message should not be visible for device 2'
+
+            device_1_home, device_2_home = create_users(self.drivers[0], self.drivers[1])
+            chat_name = device_1_home.get_public_chat_name()
+            device_1_chat, device_2_chat = create_new_group_chat(device_1_home, device_2_home, chat_name)
+            device_2_chat.decline_invitation_button.click()
+
+            # device 2: check that chat is deleted
+            if device_2_home.element_by_text(chat_name).is_element_displayed():
+                self.errors.append("Group chat '%s' is shown, but the chat has been deleted" % chat_name)
+
+            # device 1: check system message about leaving a group chat
+            device_2_default_username = get_username(device_2_home)
+            user2_left_chat_system_message = return_left_chat_system_message(device_2_default_username)
+            if not device_1_chat.chat_element_by_text(user2_left_chat_system_message).is_element_displayed():
+                self.errors.append("Message with text '%s' was not received" % user2_left_chat_system_message)
+
+            # device 1: send some message to group chat
+            device_1_chat.send_message(message_for_device_2)
+
+            # device 2: check that chat doesn't reappear
+            if device_2_home.element_by_text(chat_name).is_element_displayed():
+                self.errors.append("Group chat '%s' is shown, but the chat has been deleted" % chat_name)
+            self.verify_no_errors()
+
+    @marks.testrail_id(4001)
+    @marks.high
+    def test_remove_member_from_group_chat(self):
+        self.create_drivers(2)
+        message_for_device_2 = 'This message should not be visible for device 2'
+
+        device_1_home, device_2_home = create_users(self.drivers[0], self.drivers[1])
+        chat_name = device_1_home.get_public_chat_name()
+        device_1_chat, device_2_chat = create_and_join_group_chat(device_1_home, device_2_home, chat_name)
+        device_2_default_username = get_username(device_2_home)
+        device_2_custom_username = get_username(device_2_home, False)
+
+        # device 1: get options for device 2 in group chat and remove him
+        options = device_1_chat.get_user_options(device_2_default_username)
+        options.remove_user_button.click()
+
+        # device 2: check that removed user can see that he is removed
+        user2_left_chat_system_message_for_user_2 = return_left_chat_system_message(device_2_custom_username)
+
+        if not device_2_chat.chat_element_by_text(user2_left_chat_system_message_for_user_2).is_element_displayed():
+            self.errors.append("Message with test '%s' was not received" % user2_left_chat_system_message_for_user_2)
+
+        # device 2: check there is no message input so user can't send new message in group chat
+        if device_2_chat.chat_message_input.is_element_displayed():
+            self.errors.append("Message input is still available for removed user")
+
+        # device 1: send some message to group chat
+        device_1_chat.send_message(message_for_device_2)
+
+        # device 2: check that message is not received
+        if device_2_chat.chat_element_by_text(message_for_device_2).is_element_displayed():
+            self.errors.append("Message with text '%s' was received" % message_for_device_2)
+
+        self.verify_no_errors()
+
+    @marks.testrail_id(5694)
+    @marks.high
+    def test_make_admin_member_of_group_chat(self):
+        self.create_drivers(2)
+        chat_member = chat_users['A']
+
+        device_1_home, device_2_home = create_users(self.drivers[0], self.drivers[1])
+        chat_name = device_1_home.get_public_chat_name()
+        device_2_default_username = get_username(device_2_home)
+        device_2_custom_username = get_username(device_2_home, False)
+
+        # device 2: add contacts
+        device_2_home.add_contact(chat_member['public_key'])
+        device_2_home.get_back_to_home_view()
+
+        # create and join group chat
+        device_1_chat, device_2_chat = create_and_join_group_chat(device_1_home, device_2_home, chat_name)
+
+        # device 1: get options for device 2 in group chat and make him admin
+        options = device_1_chat.get_user_options(device_2_default_username)
+        options.make_admin_button.click()
+
+        # device 2: check presence of system message
+        user2_made_admin_system_message_for_user_2 = return_made_admin_system_message(device_2_custom_username)
+        if not device_2_chat.chat_element_by_text(user2_made_admin_system_message_for_user_2).is_element_displayed():
+            self.errors.append("Message with test '%s' was not received" % user2_made_admin_system_message_for_user_2)
+
+        # device 2: check that as admin can add new members to group chat
+        device_2_chat.add_members_to_group_chat([chat_member['username']])
+
+        self.verify_no_errors()
+
+    @marks.testrail_id(5681)
+    @marks.high
+    def test_clear_history_of_group_chat_via_group_view(self):
+        self.create_drivers(2)
+
+        device_1_home, device_2_home = create_users(self.drivers[0], self.drivers[1])
+        chat_name = device_1_home.get_public_chat_name()
+
+        # create and join group chat
+        device_1_chat, device_2_chat = create_and_join_group_chat(device_1_home, device_2_home, chat_name)
+        messages = []
+
+        # device 1, device 2: send messages and clear history on device 1
+        for chat in (device_1_chat, device_2_chat):
+            message = "Message from device: %s" % chat.driver.number
+            chat.send_message(message)
+            messages.append(message)
+
+        device_1_chat.clear_history_via_group_info()
+
+        # device 1: check that history is deleted
+        for message in messages:
+            if device_1_chat.element_starts_with_text(message).is_element_present():
+                device_1_chat.driver.fail(
+                    "Message '%s' is shown after re-login, but group chat history has been cleared" % message)
+
+        device_1_home.relogin()
+        device_1_home.element_by_text(chat_name).click()
+
+        for message in messages:
+            if device_1_chat.element_starts_with_text(message).is_element_present():
+                device_1_chat.driver.fail(
+                    "Message '%s' is shown after re-login, but group chat history has been cleared" % message)
 
         self.verify_no_errors()

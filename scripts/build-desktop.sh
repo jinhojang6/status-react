@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -e
 
@@ -10,16 +10,10 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 SCRIPTPATH="$( cd "$(dirname "$0")" ; pwd -P )"
 OS=$(uname -s)
-if [ -z $TARGET_SYSTEM_NAME ]; then
-  TARGET_SYSTEM_NAME=$OS
+if [ -z "$TARGET_OS" ]; then
+  TARGET_OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 fi
 WINDOWS_CROSSTOOLCHAIN_PKG_NAME='mxetoolchain-x86_64-w64-mingw32'
-
-if [ -z $STATUS_NO_LOGGING ]; then
-  COMPILE_FLAGS="-DCMAKE_CXX_FLAGS:='-DBUILD_FOR_BUNDLE=1'"
-else
-  COMPILE_FLAGS="-DCMAKE_CXX_FLAGS:=-DBUILD_FOR_BUNDLE=1 -DSTATUS_NO_LOGGING=1"
-fi
 
 external_modules_dir=( \
   'node_modules/react-native-languages/desktop' \
@@ -39,9 +33,9 @@ external_modules_dir=( \
 )
 
 external_fonts=( \
-  '../../../../../resources/fonts/Inter-UI-Bold.otf' \
-  '../../../../../resources/fonts/Inter-UI-Medium.otf' \
-  '../../../../../resources/fonts/Inter-UI-Regular.otf' \
+  '../../../../../resources/fonts/Inter-Bold.otf' \
+  '../../../../../resources/fonts/Inter-Medium.otf' \
+  '../../../../../resources/fonts/Inter-Regular.otf' \
 )
 
 source "$SCRIPTPATH/lib/setup/path-support.sh"
@@ -57,12 +51,12 @@ function is_linux() {
 }
 
 function is_windows_target() {
-  [[ "$TARGET_SYSTEM_NAME" =~ Windows ]]
+  [[ "$TARGET_OS" =~ windows ]]
 }
 
 function joinPath() {
   if program_exists 'realpath'; then
-    realpath -m "$1/$2"
+    realpath -m "$1/$2" 2> /dev/null
   else
     echo "$1/$2" | tr -s /
   fi
@@ -70,19 +64,28 @@ function joinPath() {
 
 function joinExistingPath() {
   if program_exists 'realpath'; then
-    realpath "$1/$2"
+    realpath "$1/$2" 2> /dev/null
   else
     echo "$1/$2" | tr -s /
   fi
 }
 
+function join { local IFS="$1"; shift; echo "$*"; }
+
+CMAKE_EXTRA_FLAGS="-DCMAKE_CXX_FLAGS:='-DBUILD_FOR_BUNDLE=1'"
+[ -n $STATUS_NO_LOGGING ] && CMAKE_EXTRA_FLAGS="$CMAKE_EXTRA_FLAGS -DSTATUS_NO_LOGGING=1"
+if is_windows_target; then
+  CMAKE_EXTRA_FLAGS="$CMAKE_EXTRA_FLAGS -DCMAKE_TOOLCHAIN_FILE='Toolchain-Ubuntu-mingw64.cmake'"
+  CMAKE_EXTRA_FLAGS="$CMAKE_EXTRA_FLAGS -DCMAKE_C_COMPILER='x86_64-w64-mingw32.shared-gcc'"
+  CMAKE_EXTRA_FLAGS="$CMAKE_EXTRA_FLAGS -DCMAKE_CXX_COMPILER='x86_64-w64-mingw32.shared-g++'"
+  CMAKE_EXTRA_FLAGS="$CMAKE_EXTRA_FLAGS -DCMAKE_RC_COMPILER='x86_64-w64-mingw32.shared-windres'"
+elif is_macos; then
+  CMAKE_EXTRA_FLAGS="$CMAKE_EXTRA_FLAGS -DCMAKE_C_COMPILER='gcc'"
+  CMAKE_EXTRA_FLAGS="$CMAKE_EXTRA_FLAGS -DCMAKE_CXX_COMPILER='g++'"
+fi
+
 STATUSREACTPATH="$(cd "$SCRIPTPATH" && cd '..' && pwd)"
 WORKFOLDER="$(joinExistingPath "$STATUSREACTPATH" 'StatusImPackage')"
-DEPLOYQTFNAME='linuxdeployqt-continuous-x86_64_20181215.AppImage'
-APPIMAGETOOLFNAME='appimagetool-x86_64_20181109.AppImage'
-DEPLOYQT=$(joinPath . "$DEPLOYQTFNAME")
-APPIMAGETOOL=$(joinPath . "$APPIMAGETOOLFNAME")
-STATUSIM_APPIMAGE_ARCHIVE="StatusImAppImage_20181208.zip"
 
 function init() {
   if [ -z $STATUSREACTPATH ]; then
@@ -97,36 +100,14 @@ function init() {
     fi
   fi
 
-  if is_macos; then
-    if [ -z $MACDEPLOYQT ]; then
-      set +e
-      MACDEPLOYQT=$(which macdeployqt)
-      if [ -z $MACDEPLOYQT ]; then
-        echo "${RED}MACDEPLOYQT environment variable is not defined and macdeployqt executable not found in path!${NC}"
-        exit 1
-      fi
-      set -e
-    fi
-
-    DEPLOYQT="$MACDEPLOYQT"
-  elif is_linux; then
+  if is_linux; then
     rm -rf ./desktop/toolchain/
     # TODO: Use Conan for Linux and MacOS builds too
     if is_windows_target; then
-      if ! program_exists 'python3'; then
-        echo "${RED}python3 prerequisite is missing. Exiting.${NC}"
-        exit 1
-      fi
-
       export PATH=$STATUSREACTPATH:$PATH
       if ! program_exists 'conan'; then
-        if ! program_exists 'pip3'; then
-          echo "${RED}pip3 package manager not found. Exiting.${NC}"
-          exit 1
-        fi
-
-        echo "${RED}Conan package manager not found. Installing...${NC}"
-        pip3 install conan==$(toolversion conan)
+        echo "${RED}Conan package manager not found. Exiting...${NC}"
+        exit 1
       fi
 
       conan remote add --insert 0 -f status-im https://conan.status.im
@@ -163,36 +144,27 @@ function buildClojureScript() {
                       --dev false --platform desktop --assets-dest "$WORKFOLDER/assets"
   echo -e "${GREEN}Generating done.${NC}"
   echo ""
-
-  # Add path to javascript bundle to package.json
-  jsBundleLine="\"desktopJSBundlePath\": \"$WORKFOLDER/Status.jsbundle\""
-  jsPackagePath=$(joinExistingPath "$STATUSREACTPATH" 'desktop_files/package.json.orig')
-  if grep -Fq "$jsBundleLine" "$jsPackagePath"; then
-    echo -e "${GREEN}Found line in package.json.${NC}"
-  else
-    # Add line to package.json just before "dependencies" line
-    if is_macos; then
-      sed -i '' -e "/\"dependencies\":/i\\
- \  $jsBundleLine," "$jsPackagePath"
-    else
-      sed -i -- "/\"dependencies\":/i\  $jsBundleLine," "$jsPackagePath"
-    fi
-    echo -e "${YELLOW}Added 'desktopJSBundlePath' line to $jsPackagePath:${NC}"
-    echo ""
-  fi
 }
 
 function compile() {
+  # Temporarily add path to javascript bundle to package.json
+  local JS_BUNDLE_PATH="$WORKFOLDER/Status.jsbundle"
+  local jsBundleLine="\"desktopJSBundlePath\": \"$JS_BUNDLE_PATH\""
+  local jsPackagePath=$(joinExistingPath "$STATUSREACTPATH" 'desktop_files/package.json.orig')
+  local tmp=$(mktemp)
+  jq ".=(. + {$jsBundleLine})" "$jsPackagePath" > "$tmp" && mv "$tmp" "$jsPackagePath"
+  echo -e "${YELLOW}Added 'desktopJSBundlePath' line to $jsPackagePath:${NC}"
+  echo ""
+
+  local EXTERNAL_MODULES_DIR="$(joinStrings ${external_modules_dir[@]})"
+  local DESKTOP_FONTS="$(joinStrings ${external_fonts[@]})"
   pushd desktop
     rm -rf CMakeFiles CMakeCache.txt cmake_install.cmake Makefile modules reportApp/CMakeFiles desktop/node_modules/google-breakpad/CMakeFiles desktop/node_modules/react-native-keychain/desktop/qtkeychain-prefix/src/qtkeychain-build/CMakeFiles desktop/node_modules/react-native-keychain/desktop/qtkeychain
-    EXTERNAL_MODULES_DIR="$(joinStrings ${external_modules_dir[@]})"
-    DESKTOP_FONTS="$(joinStrings ${external_fonts[@]})"
-    JS_BUNDLE_PATH="$WORKFOLDER/Status.jsbundle"
     if is_windows_target; then
       export PATH=$STATUSREACTPATH:$PATH
 
       # Get the toolchain bin folder from toolchain/conanbuildinfo.json
-      bin_dirs=$(jq -r '.dependencies[0].bin_paths | .[]' toolchain/conanbuildinfo.json)
+      local bin_dirs=$(jq -r '.dependencies[0].bin_paths | .[]' toolchain/conanbuildinfo.json)
       while read -r bin_dir; do
         if [ ! -d $bin ]; then
           echo -e "${RED}Could not find $bin_dir directory from 'toolchain/conanbuildinfo.json', aborting${NC}"
@@ -200,26 +172,17 @@ function compile() {
         fi
         export PATH=$bin_dir:$PATH
       done <<< "$bin_dirs"
-      cmake -Wno-dev \
-            -DCMAKE_TOOLCHAIN_FILE='Toolchain-Ubuntu-mingw64.cmake' \
-            -DCMAKE_C_COMPILER='x86_64-w64-mingw32.shared-gcc' \
-            -DCMAKE_CXX_COMPILER='x86_64-w64-mingw32.shared-g++' \
-            -DCMAKE_RC_COMPILER='x86_64-w64-mingw32.shared-windres' \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DEXTERNAL_MODULES_DIR="$EXTERNAL_MODULES_DIR" \
-            -DDESKTOP_FONTS="$DESKTOP_FONTS" \
-            -DJS_BUNDLE_PATH="$JS_BUNDLE_PATH" \
-            $COMPILE_FLAGS || exit 1
-    else
-      cmake -Wno-dev \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DEXTERNAL_MODULES_DIR="$EXTERNAL_MODULES_DIR" \
-            -DDESKTOP_FONTS="$DESKTOP_FONTS" \
-            -DJS_BUNDLE_PATH="$JS_BUNDLE_PATH" \
-            $COMPILE_FLAGS || exit 1
     fi
+    cmake -Wno-dev \
+          $CMAKE_EXTRA_FLAGS \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DEXTERNAL_MODULES_DIR="$EXTERNAL_MODULES_DIR" \
+          -DDESKTOP_FONTS="$DESKTOP_FONTS" \
+          -DJS_BUNDLE_PATH="$JS_BUNDLE_PATH" || exit 1
     make -S -j5 || exit 1
   popd
+
+  git checkout $jsPackagePath # remove the bundle from the package.json file
 }
 
 function bundleWindows() {
@@ -232,19 +195,8 @@ function bundleWindows() {
     exit 1
   fi
 
-  pushd $WORKFOLDER
-    rm -rf Windows
-    mkdir Windows
-
-    if [ -z $STATUSIM_WINDOWS_BASEIMAGE_ZIP ]; then
-      STATUSIM_WINDOWS_BASEIMAGE_ZIP=./StatusIm-Windows-base-image.zip
-      [ -f $STATUSIM_WINDOWS_BASEIMAGE_ZIP ] || wget https://desktop-app-files.ams3.digitaloceanspaces.com/StatusIm-Windows-base-image_20181113.zip -O StatusIm-Windows-base-image.zip
-    fi
-    unzip "$STATUSIM_WINDOWS_BASEIMAGE_ZIP" -d Windows/
-
-    pushd $STATUSREACTPATH/desktop/bin
-      rm -rf cmake_install.cmake Makefile CMakeFiles Status_autogen
-    popd
+  pushd $STATUSREACTPATH/desktop/bin
+    rm -rf cmake_install.cmake Makefile CMakeFiles Status_autogen
   popd
 
   local compressionAlgo="lzma"
@@ -256,11 +208,13 @@ function bundleWindows() {
     compressionAlgo="zlib"
   fi
 
+  # TODO this needs to be fixed: status-react/issues/5378
   local top_srcdir=$(joinExistingPath "$STATUSREACTPATH" '.')
   VERSION_MAJOR="$(cut -d'.' -f1 <<<"$VERSION")"
   VERSION_MINOR="$(cut -d'.' -f2 <<<"$VERSION")"
   VERSION_BUILD="$(cut -d'.' -f3 <<<"$VERSION")"
   makensis -Dtop_srcdir=${top_srcdir} \
+           -Dbase_image_dir=${STATUSREACT_WINDOWS_BASEIMAGE_PATH} \
            -DCOMPRESSION_ALGO=${compressionAlgo} \
            -DCOMPRESSION_TYPE=${compressionType} \
            -DVERSION_MAJOR=$VERSION_MAJOR \
@@ -278,102 +232,241 @@ function bundleLinux() {
     QTBIN=$(joinExistingPath "$QT_PATH" 'bin')
   fi
 
-  # invoke linuxdeployqt to create Status.AppImage
   echo "Creating AppImage..."
   pushd $WORKFOLDER
-    rm -rf StatusImAppImage*
+    rm -rf StatusImAppImage AppDir
+
     # TODO this needs to be fixed: status-react/issues/5378
-    if [ -z $STATUSIM_APPIMAGE_DIR ]; then
-      STATUSIM_APPIMAGE="./${STATUSIM_APPIMAGE_ARCHIVE}"
-    else
-      STATUSIM_APPIMAGE="${STATUSIM_APPIMAGE_DIR}/${STATUSIM_APPIMAGE_ARCHIVE}"
-    fi
-    [ -f $STATUSIM_APPIMAGE ] || wget "https://desktop-app-files.ams3.digitaloceanspaces.com/${STATUSIM_APPIMAGE_ARCHIVE}" -O $STATUSIM_APPIMAGE
-    unzip "$STATUSIM_APPIMAGE" -d .
-    rm -rf AppDir
+    cp -r ${STATUSREACT_LINUX_BASEIMAGE_PATH}/StatusImAppImage .
+    chmod -R +w StatusImAppImage/
+
     mkdir AppDir
   popd
 
-  qmakePath="$(joinExistingPath "${QTBIN}" 'qmake')"
-  usrBinPath=$(joinPath "$WORKFOLDER" "AppDir/usr/bin")
+  # invoke linuxdeployqt to create Status.AppImage
+  local qmakePath="$(joinExistingPath "${QTBIN}" 'qmake')"
+  local usrBinPath="$(joinPath "$WORKFOLDER" "AppDir/usr/bin")"
   cp -r ./deployment/linux/usr $WORKFOLDER/AppDir
   cp ./.env $usrBinPath
   cp ./desktop/bin/Status ./desktop/bin/reportApp $usrBinPath
-  
-  if [ ! -f $DEPLOYQT ]; then
-    wget --output-document="$DEPLOYQT" --show-progress "https://desktop-app-files.ams3.digitaloceanspaces.com/$DEPLOYQTFNAME" # Versioned from https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage
-    chmod a+x $DEPLOYQT
-  fi
-
-  if [ ! -f $APPIMAGETOOL ]; then
-    wget --output-document="$APPIMAGETOOL" --show-progress "https://desktop-app-files.ams3.digitaloceanspaces.com/$APPIMAGETOOLFNAME" # Versioned from https://github.com/AppImage/AppImageKit/releases/download/10/appimagetool-x86_64.AppImage
-    chmod a+x $APPIMAGETOOL
-  fi
 
   rm -f Application-x86_64.AppImage Status-x86_64.AppImage
 
-  [ $VERBOSE_LEVEL -ge 1 ] && ldd $(joinExistingPath "$usrBinPath" 'Status') 
-  desktopFilePath="$(joinExistingPath "$WORKFOLDER" 'AppDir/usr/share/applications/Status.desktop')"
+  [ $VERBOSE_LEVEL -ge 1 ] && ldd $(joinExistingPath "$usrBinPath" 'Status')
   pushd $WORKFOLDER
-    [ $VERBOSE_LEVEL -ge 1 ] && ldd $usrBinPath/Status
     cp -r assets/share/assets $usrBinPath
     cp -rf StatusImAppImage/* $usrBinPath
     rm -f $usrBinPath/Status.AppImage
   popd
 
-  $DEPLOYQT \
+  local desktopFilePath="$(joinExistingPath "$WORKFOLDER" 'AppDir/usr/share/applications/Status.desktop')"
+  linuxdeployqt \
     $desktopFilePath \
     -verbose=$VERBOSE_LEVEL -always-overwrite -no-strip \
     -no-translations -bundle-non-qt-libs \
     -qmake="$qmakePath" \
     -executable="$(joinExistingPath "$usrBinPath" 'reportApp')" \
     -qmldir="$(joinExistingPath "$STATUSREACTPATH" 'node_modules/react-native')" \
-    -qmldir="$STATUSREACTPATH/desktop/reportApp" \
-    -extra-plugins=imageformats/libqsvg.so \
-    -appimage
+    -qmldir="$(joinExistingPath "$STATUSREACTPATH" 'desktop/reportApp')" \
+    -extra-plugins=imageformats/libqsvg.so
 
   pushd $WORKFOLDER
-    [ $VERBOSE_LEVEL -ge 1 ] && ldd $usrBinPath/Status
     rm -f $usrBinPath/Status.AppImage
-    $APPIMAGETOOL ./AppDir
+
+    # Patch libraries and executables to remove references to /nix/store
+    set +e
+    for f in `find ./AppDir/usr/lib/*`; do
+      patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 $f 2> /dev/null
+      patchelf --set-rpath "\$ORIGIN" $f
+    done
+    set -e
+    for f in $usrBinPath/Status $usrBinPath/reportApp; do
+      patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 --set-rpath "\$ORIGIN:\$ORIGIN/../lib" $f
+    done
+    # To make the output more reproducible, always set the timestamps to the same value
+    for f in `find ./AppDir`; do
+      touch --no-create -h -t 197001010000.00 $f
+    done
     [ $VERBOSE_LEVEL -ge 1 ] && ldd $usrBinPath/Status
+
+    appimagetool ./AppDir
+    # Ensure the AppImage itself isn't using the interpreter in Nix's store
+    patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 --set-rpath "\$ORIGIN" ./Status-x86_64.AppImage
+    chmod +x ./Status-x86_64.AppImage
     rm -rf Status.AppImage
+    mv -f ./Status-x86_64.AppImage ..
   popd
 
   echo -e "${GREEN}Package ready in ./Status-x86_64.AppImage!${NC}"
   echo ""
 }
 
-function bundleMacOS() {
-  # download prepared package with mac bundle files (it contains qt libraries, icon)
-  echo "Downloading skeleton of mac bundle..."
+if is_macos; then
+  function copyDylibNixDependenciesToPackage() {
+    local dylib="$1"
+    local contentsDir="$2"
+    local frameworksDir="$contentsDir/Frameworks"
+    local exeDir="$contentsDir/MacOS"
 
+    # Walk through the dependencies of $dylib
+    local dependencies=$(otool -L "$dylib" | grep -E "\s+/nix/" | awk -F "(" '{print $1}' | xargs)
+    local moduleDirPath=$(basename $dylib)
+    for depDylib in $dependencies; do
+      local targetDepDylib=$(joinPath "$frameworksDir" "$(basename $depDylib)")
+      # Copy any dependencies that: are not in the Frameworks directory, do not already exist in /usr/lib and are not a Qt5 module (will be handled by macdeployqt anyway)
+      if [ ! -f "$targetDepDylib" ] && [[ "$(basename $targetDepDylib)" != "libQt5"* ]] && [ ! -f "/usr/lib/$(basename $depDylib)" ]; then
+        [ $VERBOSE_LEVEL -ge 1 ] && echo "  Copying $depDylib to $frameworksDir..."
+        cp -a -L "$depDylib" "$frameworksDir"
+        chmod 0755 "$targetDepDylib"
+
+        copyDylibNixDependenciesToPackage "$depDylib" "$contentsDir"
+      fi
+    done
+  }
+
+  function copyQtPlugInToPackage() {
+    local qtPath="$1"
+    local pluginName="$2"
+    local contentsPath="$3"
+    local filter=""
+    local targetPath="$contentsPath/PlugIns"
+    local pluginTargetPath="$targetPath/$pluginName"
+
+    [ "$pluginName" == 'platforms' ] && filter='libqcocoa.dylib'
+
+    mkdir -p $pluginTargetPath
+    local qtLibPath=$(find $qtPath/lib -maxdepth 1 -name qt-*)
+    local srcPath=$(readlink -f "$qtLibPath/plugins/$pluginName")
+    echo "Copying $srcPath to $targetPath"
+    if [ -z "$filter" ]; then
+      cp -a -f -L "$srcPath" "$targetPath"
+    else
+      cp -f $(readlink -f "$srcPath/$filter") "$pluginTargetPath"
+    fi
+    chmod 755 $pluginTargetPath
+    chmod 755 $pluginTargetPath/*
+
+    for dylib in `find $pluginTargetPath -name *.dylib`; do
+      copyDylibNixDependenciesToPackage "$dylib" "$contentsPath"
+    done
+  }
+
+  function fixupRPathsInDylib() {
+    local dylib="$1"
+    local contentsDir="$2"
+    local frameworksDir="$contentsDir/Frameworks"
+    local exeDir="$contentsDir/MacOS"
+
+    [ $VERBOSE_LEVEL -ge 1 ] && echo "Checking rpaths in ${dylib}"
+  
+    # Walk through the dependencies of $dylib
+    local dependencies=$(otool -L "$dylib" | grep -E "\s+/nix/" | sed "s|@executable_path|$exeDir|" | awk -F "(" '{print $1}' | xargs)
+    local moduleDirPath=$(dirname $dylib)
+    for depDylib in $dependencies; do
+      # Fix rpath and copy library to target
+      local replacementTargetPath=""
+      local framework=$(echo $depDylib | sed -E "s|^\/nix\/.+\/Library\/Frameworks\/(.+)\.framework\/\1$|\1|" 2> /dev/null)
+      if [ -n "$framework" ] && [ "$framework" != "$depDylib" ]; then
+        # Handle macOS framework
+        local targetDepDylib=$(joinExistingPath "/System/Library/Frameworks" "${framework}.framework/${framework}")
+
+        if [ ! -f "$targetDepDylib" ]; then
+          echo -e "${RED}FATAL: system framework not found: ${targetDepDylib}${NC}"
+          exit 1
+        fi
+
+        # Change dependency rpath in $dylib to point to $targetDepDylib
+        replacementTargetPath=$targetDepDylib
+      else
+        # Handle other libraries
+        local targetDepDylib=$(joinPath "$frameworksDir" "$(basename $depDylib)")
+
+        if [ ! -f "$targetDepDylib" ]; then
+          echo -e "${RED}FATAL: macdeployqt should have copied the dependency to ${targetDepDylib}${NC}"
+          exit 1
+        fi
+
+        # Change dependency rpath in $dylib to point to $replacementTargetPath
+        local replacementPath=""
+        local targetDepModuleDirPath=$(dirname $targetDepDylib)
+        if [[ $targetDepModuleDirPath -ef $moduleDirPath ]]; then
+          replacementPath="@loader_path"
+        else
+          replacementPath="@executable_path/$(realpath --relative-to="$exeDir" "$targetDepModuleDirPath")"
+        fi
+        local modulePathRegExp="($(pwd)/)?$moduleDirPath"
+        replacementTargetPath=$(echo $targetDepDylib | sed -E "s|$modulePathRegExp|$replacementPath|")
+      fi
+
+      if [ -n "$replacementTargetPath" ]; then
+        [ $VERBOSE_LEVEL -ge 1 ] && echo "Updating $dylib to point to $replacementTargetPath"
+        install_name_tool -change "$depDylib" "$replacementTargetPath" "$dylib"
+      fi
+    done
+  }
+
+  function fixupRemainingRPaths() {
+    local searchRootPath="$1"
+    local contentsDir="$2"
+
+    for dylib in `find $searchRootPath -name *.dylib`; do
+      fixupRPathsInDylib "$dylib" "$contentsDir"
+
+      # Sanity check for absolute paths
+      local dependencies=$(otool -L "$dylib" | grep -E "\s+${STATUSREACTPATH}")
+      if [ -n "$dependencies" ]; then
+        echo "Absolute path detected in dependencies of $dylib. Aborting..."
+        echo "${dependencies[@]}"
+        exit 1
+      fi
+    done
+  }
+fi
+
+function bundleMacOS() {
   pushd $WORKFOLDER
+    # download prepared package with mac bundle files (it contains qt libraries, icon)
     rm -rf Status.app
     # TODO this needs to be fixed: status-react/issues/5378
-    [ -f ./Status.app.zip ] || curl -L -o Status.app.zip https://desktop-app-files.ams3.digitaloceanspaces.com/Status_20181113.app.zip
-    echo -e "${GREEN}Downloading done.${NC}"
-    echo ""
-    unzip ./Status.app.zip
-    cp -r assets/share/assets Status.app/Contents/Resources
-    ln -sf ../Resources/assets ../Resources/ubuntu-server ../Resources/node_modules Status.app/Contents/MacOS
-    chmod +x Status.app/Contents/Resources/ubuntu-server
-    cp ../desktop/bin/Status Status.app/Contents/MacOS/Status
-    cp ../desktop/bin/reportApp Status.app/Contents/MacOS
-    cp ../.env Status.app/Contents/Resources
-    ln -sf ../Resources/.env Status.app/Contents/MacOS/.env
-    cp -f ../deployment/macos/qt-reportApp.conf Status.app/Contents/Resources
-    ln -sf ../Resources/qt-reportApp.conf Status.app/Contents/MacOS/qt.conf
-    install_name_tool -add_rpath "@executable_path/../Frameworks" \
-                      -delete_rpath "${QT_PATH}/lib" \
-                      'Status.app/Contents/MacOS/reportApp'
-    install_name_tool -add_rpath "@executable_path/../Frameworks" \
-                      -delete_rpath "${QT_PATH}/lib" \
-                      'Status.app/Contents/MacOS/Status'
-    cp -f ../deployment/macos/Info.plist Status.app/Contents
-    cp -f ../deployment/macos/status-icon.icns Status.app/Contents/Resources
-    $DEPLOYQT Status.app -verbose=$VERBOSE_LEVEL \
-      -qmldir="$STATUSREACTPATH/node_modules/react-native/ReactQt/runtime/src/qml/"
+    cp -r ${STATUSREACT_MACOS_BASEIMAGE_PATH}/Status.app .
+    chmod -R +w Status.app/
+
+    local contentsPath='Status.app/Contents'
+    local usrBinPath=$(joinExistingPath "$WORKFOLDER" "$contentsPath/MacOS")
+
+    cp -r assets/share/assets $contentsPath/Resources
+    ln -sf ../Resources/assets ../Resources/ubuntu-server ../Resources/node_modules $usrBinPath
+    chmod +x $contentsPath/Resources/ubuntu-server
+    cp ../desktop/bin/Status $usrBinPath/Status
+    cp ../desktop/bin/reportApp $usrBinPath
+    cp ../.env $contentsPath/Resources
+    ln -sf ../Resources/.env $usrBinPath/.env
+    cp -f ../deployment/macos/qt-reportApp.conf $contentsPath/Resources
+    ln -sf ../Resources/qt-reportApp.conf $usrBinPath/qt.conf
+    cp -f ../deployment/macos/Info.plist $contentsPath
+    cp -f ../deployment/macos/status-icon.icns $contentsPath/Resources
+
+    local qtbaseplugins=(bearer platforms printsupport styles)
+    local qtfullplugins=(iconengines imageformats webview)
+    if program_exists nix && [ -n "$IN_NIX_SHELL" ]; then
+      # Since in the Nix qt.full package the different Qt modules are spread across several directories,
+      # macdeployqt cannot find some qtbase plugins, so we copy them in its place
+      mkdir -p "$contentsPath/PlugIns"
+      for plugin in ${qtbaseplugins[@]}; do copyQtPlugInToPackage "$QT_BASEBIN_PATH" "$plugin" "$contentsPath"; done
+      for plugin in ${qtfullplugins[@]}; do copyQtPlugInToPackage "$QT_PATH" "$plugin" "$contentsPath"; done
+    fi
+
+    macdeployqt Status.app \
+      -verbose=$VERBOSE_LEVEL \
+      -executable="$(joinExistingPath "$usrBinPath" 'reportApp')" \
+      -qmldir="$(joinExistingPath "$STATUSREACTPATH" 'node_modules/react-native')" \
+      -qmldir="$(joinExistingPath "$STATUSREACTPATH" 'desktop/reportApp')"
+
+    # macdeployqt doesn't fix rpaths for all the libraries (although it copies them all), so we'll just walk through them and update rpaths to not point to /nix
+    echo "Fixing remaining rpaths in modules..."
+    fixupRemainingRPaths "$contentsPath/Frameworks" "$contentsPath"
+    fixupRemainingRPaths "$contentsPath/PlugIns" "$contentsPath"
+    echo "Done fixing rpaths in modules"
     rm -f Status.app.zip
   popd
 

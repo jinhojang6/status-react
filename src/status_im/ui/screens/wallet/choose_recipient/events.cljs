@@ -4,6 +4,7 @@
             [status-im.contact.db :as contact.db]
             [status-im.i18n :as i18n]
             [status-im.utils.ethereum.core :as ethereum]
+            [status-im.utils.ethereum.eip55 :as eip55]
             [status-im.utils.ethereum.eip681 :as eip681]
             [status-im.utils.ethereum.ens :as ens]
             [status-im.utils.handlers :as handlers]
@@ -19,22 +20,24 @@
 (defn- find-address-name [db address]
   (:name (contact.db/find-contact-by-address (:contacts/contacts db) address)))
 
-(defn- fill-request-details [db {:keys [address name value symbol gas gasPrice public-key from-chat?]}]
+(defn- fill-request-details [db {:keys [address name value symbol gas gasPrice public-key from-chat?]} request?]
   {:pre [(not (nil? address))]}
-  (let [name (or name (find-address-name db address))]
-    (update-in
-     db [:wallet :send-transaction]
-     (fn [{old-symbol :symbol :as old-transaction}]
-       (let [symbol-changed? (not= old-symbol symbol)]
-         (cond-> (assoc old-transaction :to address :to-name name :public-key public-key)
-           value (assoc :amount value)
-           symbol (assoc :symbol symbol)
-           (and gas symbol-changed?) (assoc :gas (money/bignumber gas))
-           from-chat? (assoc :from-chat? from-chat?)
-           (and gasPrice symbol-changed?)
-           (assoc :gas-price (money/bignumber gasPrice))
-           (and symbol (not gasPrice) symbol-changed?)
-           (assoc :gas-price (ethereum/estimate-gas symbol))))))))
+  (let [name (or name (find-address-name db address))
+        data-path (if request?
+                    [:wallet :request-transaction]
+                    [:wallet :send-transaction])]
+    (update-in db data-path
+               (fn [{old-symbol :symbol :as old-transaction}]
+                 (let [symbol-changed? (not= old-symbol symbol)]
+                   (cond-> (assoc old-transaction :to address :to-name name :public-key public-key)
+                     value (assoc :amount value)
+                     symbol (assoc :symbol symbol)
+                     (and gas symbol-changed?) (assoc :gas (money/bignumber gas))
+                     from-chat? (assoc :from-chat? from-chat?)
+                     (and gasPrice symbol-changed?)
+                     (assoc :gas-price (money/bignumber gasPrice))
+                     (and symbol (not gasPrice) symbol-changed?)
+                     (assoc :gas-price (ethereum/estimate-gas symbol))))))))
 
 (defn- extract-details
   "First try to parse as EIP681 URI, if not assume this is an address directly.
@@ -66,8 +69,8 @@
 
 (re-frame/reg-fx
  :resolve-address
- (fn [{:keys [web3 registry ens-name cb]}]
-   (ens/get-addr web3 registry ens-name cb)))
+ (fn [{:keys [registry ens-name cb]}]
+   (ens/get-addr registry ens-name cb)))
 
 (handlers/register-handler-fx
  :wallet.send/set-recipient
@@ -81,8 +84,12 @@
                           :ens-name recipient
                           :cb       #(re-frame/dispatch [:wallet.send/set-recipient %])}}
        (if (ethereum/address? recipient)
-         {:db       (assoc-in db [:wallet :send-transaction :to] recipient)
-          :dispatch [:navigate-back]}
+         (if (-> recipient
+                 ethereum/address->checksum
+                 eip55/valid-address-checksum?)
+           {:db       (assoc-in db [:wallet :send-transaction :to] recipient)
+            :dispatch [:navigate-back]}
+           {:ui/show-error (i18n/label :t/wallet-invalid-address-checksum {:data recipient})})
          {:ui/show-error (i18n/label :t/wallet-invalid-address {:data recipient})})))))
 
 (handlers/register-handler-fx
@@ -100,7 +107,7 @@
          symbol-changed?                        (and old-symbol new-symbol (not= old-symbol new-symbol))]
      (cond-> {:db         db
               :dispatch   [:navigate-back]}
-       (and address valid-network?) (update :db #(fill-request-details % details))
+       (and address valid-network?) (update :db #(fill-request-details % details false))
        symbol-changed? (changed-asset old-symbol new-symbol)
        (and old-amount new-amount (not= old-amount new-amount)) (changed-amount-warning old-amount new-amount)
         ;; NOTE(goranjovic) - the next line is there is because QR code scanning switches the amount to ETH
@@ -114,6 +121,6 @@
 
 (handlers/register-handler-fx
  :wallet/fill-request-from-contact
- (fn [{db :db} [_ {:keys [address name public-key]}]]
-   {:db         (fill-request-details db {:address address :name name :public-key public-key})
+ (fn [{db :db} [_ {:keys [address name public-key]} request?]]
+   {:db         (fill-request-details db {:address address :name name :public-key public-key} request?)
     :dispatch   [:navigate-back]}))

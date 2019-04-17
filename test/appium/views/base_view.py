@@ -12,6 +12,7 @@ from PIL import Image
 from datetime import datetime
 from io import BytesIO
 from views.base_element import BaseButton, BaseElement, BaseEditBox, BaseText
+from support.device_apps import start_web_browser
 
 
 class BackButton(BaseButton):
@@ -43,7 +44,7 @@ class AllowButton(BaseButton):
 class DenyButton(BaseButton):
     def __init__(self, driver):
         super(DenyButton, self).__init__(driver)
-        self.locator = self.Locator.xpath_selector("//*[@text='DENY']")
+        self.locator = self.Locator.xpath_selector("//*[@text='Deny' or @text='DENY']")
 
 
 class DeleteButton(BaseButton):
@@ -104,6 +105,21 @@ class HomeButton(TabButton):
         return self.navigate()
 
 
+class DappTabButton(TabButton):
+    def __init__(self, driver):
+        super(DappTabButton, self).__init__(driver)
+        self.locator = self.Locator.accessibility_id('dapp-tab-button')
+
+    def navigate(self):
+        from views.dapps_view import DappsView
+        return DappsView(self.driver)
+
+    def click(self):
+        from views.dapps_view import EnterUrlEditbox
+        self.click_until_presence_of_element(EnterUrlEditbox(self.driver))
+        return self.navigate()
+
+
 class WalletButton(TabButton):
     def __init__(self, driver):
         super(WalletButton, self).__init__(driver)
@@ -142,28 +158,27 @@ class SaveButton(BaseButton):
     def __init__(self, driver):
         super(SaveButton, self).__init__(driver)
         self.locator = self.Locator.xpath_selector(
-            "//android.widget.TextView[@text='SAVE']")
+            "//android.widget.TextView[@text='Save']")
 
 
 class NextButton(BaseButton):
     def __init__(self, driver):
         super(NextButton, self).__init__(driver)
         self.locator = self.Locator.xpath_selector(
-            "//android.widget.TextView[@text='NEXT']")
+            "//android.widget.TextView[@text='Next']")
 
 
 class AddButton(BaseButton):
     def __init__(self, driver):
         super(AddButton, self).__init__(driver)
         self.locator = self.Locator.xpath_selector(
-            "//android.widget.TextView[@text='ADD']")
+            "//android.widget.TextView[@text='Add']")
 
 
 class DoneButton(BaseButton):
     def __init__(self, driver):
         super(DoneButton, self).__init__(driver)
-        self.locator = self.Locator.xpath_selector(
-            "//android.widget.TextView[@text='DONE']")
+        self.locator = self.Locator.xpath_selector("//*[@content-desc='done-button' or contains(@text, 'Done')]")
 
 
 class AppsButton(BaseButton):
@@ -222,21 +237,24 @@ class ProgressBar(BaseElement):
         self.locator = self.Locator.xpath_selector(parent_locator + '//android.widget.ProgressBar')
 
 
-class WalletModalButton(BaseButton):
-    def __init__(self, driver):
-        super(WalletModalButton, self).__init__(driver)
-        self.locator = self.Locator.xpath_selector("//*[@text='View my wallet']")
-
-    def navigate(self):
-        from views.wallet_view import WalletView
-        return WalletView(self.driver)
-
-
 class CrossIcon(BaseButton):
-
     def __init__(self, driver):
         super(CrossIcon, self).__init__(driver)
         self.locator = self.Locator.xpath_selector('(//android.view.ViewGroup[@content-desc="icon"])[1]')
+
+
+class ShowRoots(BaseButton):
+
+    def __init__(self, driver):
+        super(ShowRoots, self).__init__(driver)
+        self.locator = self.Locator.accessibility_id('Show roots')
+
+
+class GetStartedButton(BaseButton):
+
+    def __init__(self, driver):
+        super(GetStartedButton, self).__init__(driver)
+        self.locator = self.Locator.xpath_selector("//*[@text='Get started']")
 
 
 class AssetButton(BaseButton):
@@ -254,6 +272,20 @@ class AssetButton(BaseButton):
         self.driver.info('Tap on %s' % self.name)
 
 
+class OpenInStatusButton(BaseButton):
+    def __init__(self, driver):
+        super(OpenInStatusButton, self).__init__(driver)
+        self.locator = self.Locator.xpath_selector('//*[@text="Open in Status"]')
+
+    def click(self):
+        self.wait_for_visibility_of_element()
+        
+        # 'Open in Status' button already in DOM but need to scroll down so that click action works
+        self.driver.swipe(500, 1000, 500, 100)
+        self.driver.info('Tap on %s' % self.name)
+        self.wait_for_element().click()
+
+
 class BaseView(object):
     def __init__(self, driver):
         self.driver = driver
@@ -261,6 +293,7 @@ class BaseView(object):
         self.home_button = HomeButton(self.driver)
         self.wallet_button = WalletButton(self.driver)
         self.profile_button = ProfileButton(self.driver)
+        self.dapp_tab_button = DappTabButton(self.driver)
 
         self.yes_button = YesButton(self.driver)
         self.no_button = NoButton(self.driver)
@@ -279,11 +312,14 @@ class BaseView(object):
         self.confirm_button = ConfirmButton(self.driver)
         self.connection_status = ConnectionStatusText(self.driver)
         self.cross_icon = CrossIcon(self.driver)
+        self.show_roots_button = ShowRoots(self.driver)
+        self.get_started_button = GetStartedButton(self.driver)
+
+        # external browser
+        self.open_in_status_button = OpenInStatusButton(self.driver)
 
         self.apps_button = AppsButton(self.driver)
         self.status_app_icon = StatusAppIcon(self.driver)
-
-        self.wallet_modal_button = WalletModalButton(self.driver)
 
         self.element_types = {
             'base': BaseElement,
@@ -414,6 +450,10 @@ class BaseView(object):
     def swipe_down(self):
         self.driver.swipe(500, 500, 500, 1000)
 
+    def get_status_test_dapp_view(self):
+        from views.web_views.status_test_dapp import StatusTestDAppView
+        return StatusTestDAppView(self.driver)
+
     def get_home_view(self):
         from views.home_view import HomeView
         return HomeView(self.driver)
@@ -464,18 +504,22 @@ class BaseView(object):
 
     def get_back_to_home_view(self):
         counter = 0
-        while not self.home_button.is_element_displayed(2):
+        from views.home_view import PlusButton
+        while not PlusButton(self.driver).is_element_displayed(2):
             try:
                 if counter >= 5:
-                    return
+                    break
                 self.back_button.click()
             except (NoSuchElementException, TimeoutException):
                 counter += 1
         return self.home_button.click()
 
     def relogin(self, password=common_password):
-        self.get_back_to_home_view()
-        profile_view = self.profile_button.click()
+        try:
+            profile_view = self.profile_button.click()
+        except (NoSuchElementException, TimeoutException):
+            self.get_back_to_home_view()
+            profile_view = self.profile_button.click()
         profile_view.logout()
         sign_in_view = self.get_sign_in_view()
         sign_in_view.sign_in(password)
@@ -489,11 +533,10 @@ class BaseView(object):
         return public_key
 
     def share_via_messenger(self):
-        self.element_by_text('Messenger').click()
+        self.element_by_text('Messages').click()
         self.element_by_text('NEW MESSAGE').click()
-        self.send_as_keyevent('+0')
+        self.send_as_keyevent('+0100100101')
         self.confirm()
-        self.element_by_accessibility_id('Send Message').click()
 
     def reconnect(self):
         connect_status = self.connection_status
@@ -523,11 +566,21 @@ class BaseView(object):
     def toggle_airplane_mode(self):
         # opening android settings
         self.driver.start_activity(app_package='com.android.settings', app_activity='.Settings')
-        more_button = self.element_by_text('More')
-        more_button.wait_for_visibility_of_element()
-        more_button.click()
+        network_and_internet = self.element_by_text('Network & Internet')
+        network_and_internet.wait_for_visibility_of_element()
+        network_and_internet.click()
         airplane_toggle = self.element_by_xpath('//*[@resource-id="android:id/switch_widget"]')
         airplane_toggle.wait_for_visibility_of_element()
         airplane_toggle.click()
         # opening Status app
-        self.driver.start_activity(app_package='im.status.ethereum', app_activity='.MainActivity')
+        app_package, app_activity = 'im.status.ethereum', '.MainActivity'
+        if pytest.config.getoption('pr_number'):
+            app_package, app_activity = 'im.status.ethereum.pr', 'im.status.ethereum.MainActivity'
+        self.driver.start_activity(app_package=app_package, app_activity=app_activity)
+
+    def open_universal_web_link(self, deep_link):
+        start_web_browser(self.driver)
+        self.send_as_keyevent(deep_link)
+        self.confirm()
+        self.open_in_status_button.click()
+

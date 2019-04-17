@@ -17,7 +17,6 @@
   [react/view
    [react/text-input
     (merge {:style               styles/profile-name-input-text
-            :font                :medium
             :placeholder         ""
             :default-value       name
             :auto-focus          true
@@ -41,7 +40,7 @@
                    :number-of-lines 1}
        name]
       (when (and public-key (not= generated-name name))
-        [react/text {:style styles/profile-three-words
+        [react/text {:style           styles/profile-three-words
                      :number-of-lines 1}
          generated-name])]]))
 
@@ -97,8 +96,7 @@
       (or item-text (i18n/label label-kw))]
      (when-not (string/blank? value)
        [react/text {:style           styles/settings-item-value
-                    :number-of-lines 1
-                    :uppercase?      true}
+                    :number-of-lines 1}
         value])]
     (if icon-content
       icon-content

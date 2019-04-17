@@ -49,7 +49,6 @@
    [components.common/bottom-button
     {:on-press   #(re-frame/dispatch [:keycard-settings.ui/reset-card-next-button-pressed])
      :disabled?  disabled?
-     :uppercase? false
      :forward?   true}]])
 
 (defview reset-card []
@@ -68,10 +67,8 @@
                               :height 160}}]]
       [react/view {:flex               1
                    :padding-horizontal 30}
-       [react/text {:style {:font-weight :bold
-                            :color       colors/black
-                            :font-size   22
-                            :text-align  :center}}
+       [react/text {:style {:typography :header
+                            :text-align :center}}
         (i18n/label :t/reset-card-description)]
        [activity-indicator disabled?]]
       [react/view {:flex-direction   :row
@@ -88,14 +85,13 @@
   [react/view
    [react/text {:style {:font-size          20
                         :text-align         :center
-                        :padding-horizontal 40
-                        :color              colors/black}}
+                        :padding-horizontal 40}}
     (i18n/label :t/keycard-blocked)]])
 
 (defview keycard-settings []
   (letsubs [paired-on [:keycard-paired-on]
             puk-retry-counter [:hardwallet/puk-retry-counter]
-            pairing [:keycard-pairing]]
+            pairing [:keycard-account-pairing]]
     [react/view {:flex 1}
      [status-bar/status-bar]
      [toolbar/simple-toolbar
@@ -130,9 +126,10 @@
              [action-row {:icon     :main-icons/close
                           :label    :t/unpair-card
                           :on-press #(re-frame/dispatch [:keycard-settings.ui/unpair-card-pressed])}]])])]
-      [react/view {:margin-bottom 20
-                   :margin-left   16}
-       [action-row {:icon        :main-icons/logout
-                    :color-theme :red
-                    :label       :t/reset-card
-                    :on-press    #(re-frame/dispatch [:keycard-settings.ui/reset-card-pressed])}]]]]))
+      (when pairing
+        [react/view {:margin-bottom 20
+                     :margin-left   16}
+         [action-row {:icon        :main-icons/logout
+                      :color-theme :red
+                      :label       :t/reset-card
+                      :on-press    #(re-frame/dispatch [:keycard-settings.ui/reset-card-pressed])}]])]]))

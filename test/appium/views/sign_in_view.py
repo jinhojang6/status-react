@@ -45,20 +45,19 @@ class RecoverAccessButton(BaseButton):
 class CreateAccountButton(BaseButton):
     def __init__(self, driver):
         super(CreateAccountButton, self).__init__(driver)
-        self.locator = self.Locator.xpath_selector(
-            "//android.widget.TextView[@text='CREATE ACCOUNT' or @text='CREATE NEW ACCOUNT']")
+        self.locator = self.Locator.xpath_selector("//*[@text='Create account' or @text='Create new account']")
 
 
 class IHaveAccountButton(RecoverAccessButton):
     def __init__(self, driver):
         super(IHaveAccountButton, self).__init__(driver)
-        self.locator = self.Locator.xpath_selector("//android.widget.TextView[@text='I ALREADY HAVE AN ACCOUNT']")
+        self.locator = self.Locator.xpath_selector("//*[@text='I already have an account']")
 
 
 class AddExistingAccountButton(RecoverAccessButton):
     def __init__(self, driver):
         super(AddExistingAccountButton, self).__init__(driver)
-        self.locator = self.Locator.xpath_selector("//android.widget.TextView[@text='ADD EXISTING ACCOUNT']")
+        self.locator = self.Locator.xpath_selector("//*[@text='Add existing account']")
 
 
 class ConfirmPasswordInput(BaseEditBox):
@@ -78,7 +77,7 @@ class OtherAccountsButton(BaseButton):
 
     def __init__(self, driver):
         super(OtherAccountsButton, self).__init__(driver)
-        self.locator = self.Locator.text_selector('OTHER ACCOUNTS')
+        self.locator = self.Locator.text_selector('Other accounts')
 
 
 class PrivacyPolicyLink(BaseButton):
@@ -125,6 +124,7 @@ class SignInView(BaseView):
         self.name_input.set_value(username)
 
         self.next_button.click()
+        self.get_started_button.click()
         return self.get_home_view()
 
     def recover_access(self, passphrase: str, password: str = common_password):
@@ -134,9 +134,9 @@ class SignInView(BaseView):
         else:
             recover_access_view = self.i_have_account_button.click()
         recover_access_view.passphrase_input.click()
-        recover_access_view.send_as_keyevent(passphrase)
+        recover_access_view.passphrase_input.set_value(passphrase)
         recover_access_view.password_input.click()
-        recover_access_view.send_as_keyevent(password)
+        recover_access_view.password_input.set_value(password)
         recover_access_view.sign_in_button.click_until_presence_of_element(recover_access_view.home_button)
         return self.get_home_view()
 
@@ -154,3 +154,7 @@ class SignInView(BaseView):
         except IndexError:
             raise NoSuchElementException(
                 'Device %s: Unable to find account by position %s' % (self.driver.number, position)) from None
+
+    def open_weblink_and_login(self, url_weblink):
+        self.open_universal_web_link(url_weblink)
+        self.sign_in()

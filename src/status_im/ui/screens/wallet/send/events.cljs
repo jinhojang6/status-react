@@ -18,7 +18,10 @@
             [status-im.utils.money :as money]
             [status-im.utils.security :as security]
             [status-im.utils.types :as types]
-            [status-im.utils.utils :as utils]))
+            [status-im.utils.utils :as utils]
+            [status-im.utils.config :as config]
+            [status-im.transport.utils :as transport.utils]
+            [status-im.hardwallet.core :as hardwallet]))
 
 ;;;; FX
 
@@ -43,6 +46,11 @@
  (fn [{:keys [params on-completed]}]
    (status/sign-message (types/clj->json params)
                         on-completed)))
+
+(re-frame/reg-fx
+ ::sign-typed-data
+ (fn [{:keys [data on-completed password]}]
+   (status/sign-typed-data data (security/safe-unmask-data password) on-completed)))
 
 (re-frame/reg-fx
  :wallet/show-transaction-error
@@ -70,18 +78,7 @@
                             #(re-frame/dispatch [::transaction-completed (types/json->clj %)])
                             password]}))))
 
-;; SIGN MESSAGE
-(handlers/register-handler-fx
- :wallet/sign-message
- (fn [{db :db} _]
-   (let [{:keys [data from password]} (get-in db [:wallet :send-transaction])]
-     {:db            (assoc-in db [:wallet :send-transaction :in-progress?] true)
-      ::sign-message {:params       {:data     data
-                                     :password (security/safe-unmask-data password)
-                                     :account  from}
-                      :on-completed #(re-frame/dispatch [::transaction-completed (types/json->clj %)])}})))
-
-;; SEND TRANSACTION (SIGN MESSAGE) CALLBACK
+;; SEND TRANSACTION CALLBACK
 (handlers/register-handler-fx
  ::transaction-completed
  (fn [{:keys [db now] :as cofx} [_ {:keys [result error]}]]
@@ -94,7 +91,7 @@
        (merge
         {:db (cond-> (assoc-in db' [:wallet :send-transaction] {})
 
-               (not= method constants/web3-personal-sign)
+               (not (constants/web3-sign-message? method))
                (assoc-in [:wallet :transactions result]
                          (models.wallet/prepare-unconfirmed-transaction db now result)))}
 
@@ -105,6 +102,37 @@
                                                             :amount  amount-text
                                                             :tx-hash result}]}))))))
 
+(re-frame/reg-fx
+ :show-sign-message-error
+ (fn [[password-error-cb]]
+   (password-error-cb)))
+
+;; SIGN MESSAGE CALLBACK
+(handlers/register-handler-fx
+ ::sign-message-completed
+ (fn [{:keys [db now] :as cofx} [_ {:keys [on-result id method]} {:keys [result error]} password-error-cb]]
+   (let [db' (assoc-in db [:wallet :send-transaction :in-progress?] false)]
+     (if error
+       ;; ERROR
+       {:show-sign-message-error [password-error-cb]}
+       ;; RESULT
+       (if on-result
+         {:dispatch (conj on-result id result method)})))))
+
+(handlers/register-handler-fx
+ ::hash-message-completed
+ (fn [{:keys [db] :as cofx} [_ {:keys [result error]}]]
+   (let [db' (assoc-in db [:wallet :send-transaction :in-progress?] false)]
+     (if error
+       ;; ERROR
+       (models.wallet/handle-transaction-error (assoc cofx :db db') error)
+       ;; RESULT
+       (fx/merge cofx
+                 {:db (-> db
+                          (assoc-in [:hardwallet :pin :enter-step] :sign)
+                          (assoc-in [:hardwallet :hash] result))}
+                 (navigation/navigate-to-cofx :enter-pin nil))))))
+
 ;; DISCARD TRANSACTION
 (handlers/register-handler-fx
  :wallet/discard-transaction
@@ -114,8 +142,9 @@
 (handlers/register-handler-fx
  :wallet.dapp/transaction-on-result
  (fn [{db :db} [_ message-id id result method]]
-   (let [webview (:webview-bridge db)]
-     (models.wallet/dapp-complete-transaction (int id) result method message-id webview))))
+   (let [webview (:webview-bridge db)
+         keycard? (boolean (get-in db [:account/account :keycard-instance-uid]))]
+     (models.wallet/dapp-complete-transaction (int id) result method message-id webview keycard?))))
 
 (handlers/register-handler-fx
  :wallet.dapp/transaction-on-error
@@ -131,8 +160,12 @@
    (let [{:keys [send-transaction transactions-queue]} (:wallet db)
          {:keys [payload message-id] :as queued-transaction} (last transactions-queue)
          {:keys [method params id]} payload
+         keycard? (boolean (get-in db [:account/account :keycard-instance-uid]))
          db' (update-in db [:wallet :transactions-queue] drop-last)]
-     (when (and (not (= :wallet-transaction-sent (:view-id db))) (not (:id send-transaction)) queued-transaction)
+     (when (and (not (contains? #{:wallet-transaction-sent
+                                  :wallet-transaction-sent-modal}
+                                (:view-id db)))
+                (not (:id send-transaction)) queued-transaction)
        (cond
 
          ;;SEND TRANSACTION
@@ -141,17 +174,23 @@
            (models.wallet/open-modal-wallet-for-transaction db' transaction (first params)))
 
          ;;SIGN MESSAGE
-         (= method constants/web3-personal-sign)
-         (let [[address data] (models.wallet/normalize-sign-message-params params)]
+         (constants/web3-sign-message? method)
+         (let [typed? (not= constants/web3-personal-sign method)
+               [address data] (models.wallet/normalize-sign-message-params params)]
            (if (and address data)
-             (let [db'' (assoc-in db' [:wallet :send-transaction]
-                                  {:id               (str (or id message-id))
-                                   :from             address
-                                   :data             data
-                                   :on-result        [:wallet.dapp/transaction-on-result message-id]
-                                   :on-error         [:wallet.dapp/transaction-on-error message-id]
-                                   :method           method})]
-               (navigation/navigate-to-cofx {:db db''} :wallet-sign-message-modal nil))
+             (let [signing-phrase (-> (get-in db [:account/account :signing-phrase])
+                                      (clojure.string/replace-all #" " "     "))
+                   screen-params {:id             (str (or id message-id))
+                                  :from           address
+                                  :data           data
+                                  :typed?         typed?
+                                  :decoded-data   (if typed? (types/json->clj data) (transport.utils/to-utf8 data))
+                                  :on-result      [:wallet.dapp/transaction-on-result message-id]
+                                  :on-error       [:wallet.dapp/transaction-on-error message-id]
+                                  :method         method
+                                  :signing-phrase signing-phrase
+                                  :keycard?       keycard?}]
+               (navigation/navigate-to-cofx {:db db'} :wallet-sign-message-modal screen-params))
              {:db db'})))))))
 
 (handlers/register-handler-fx
@@ -165,7 +204,11 @@
      (fx/merge cofx
                #(when send-command?
                   (commands-sending/send % chat-id send-command? params))
-               (navigation/navigate-to-clean :wallet-transaction-sent {})))))
+               (navigation/navigate-to-clean
+                (if (contains? #{:wallet-send-transaction :enter-pin :hardwallet-connect} (:view-id db))
+                  :wallet-transaction-sent
+                  :wallet-transaction-sent-modal)
+                {})))))
 
 (defn set-and-validate-amount-db [db amount symbol decimals]
   (let [{:keys [value error]} (wallet.db/parse-amount amount decimals)]
@@ -271,3 +314,74 @@
              {:dispatch-later [{:ms 400 :dispatch [:check-dapps-transactions-queue]}]}
              (navigation/navigate-back))))
 
+(re-frame/reg-fx
+ ::hash-transaction
+ (fn [{:keys [transaction all-tokens symbol chain on-completed]}]
+   (status/hash-transaction (types/clj->json transaction) on-completed)))
+
+(re-frame/reg-fx
+ ::hash-message
+ (fn [{:keys [message on-completed]}]
+   (status/hash-message message on-completed)))
+
+(re-frame/reg-fx
+ ::hash-typed-data
+ (fn [{:keys [data on-completed]}]
+   (status/hash-typed-data data on-completed)))
+
+(defn send-keycard-transaction
+  [{{:keys [chain] :as db} :db}]
+  (let [{:keys [symbol] :as transaction} (get-in db [:wallet :send-transaction])
+        all-tokens (:wallet/all-tokens db)
+        from (get-in db [:account/account :address])]
+    {::hash-transaction {:transaction  (models.wallet/prepare-send-transaction from transaction)
+                         :all-tokens   all-tokens
+                         :symbol       symbol
+                         :chain        chain
+                         :on-completed #(re-frame/dispatch [:wallet.callback/hash-transaction-completed %])}}))
+
+(handlers/register-handler-fx
+ :wallet.callback/hash-transaction-completed
+ (fn [{:keys [db] :as cofx} [_ result]]
+   (let [{:keys [transaction hash]} (:result (types/json->clj result))]
+     (fx/merge cofx
+               {:db (-> db
+                        (assoc-in [:hardwallet :pin :enter-step] :sign)
+                        (assoc-in [:hardwallet :transaction] transaction)
+                        (assoc-in [:hardwallet :hash] hash))}
+               (navigation/navigate-to-clean :enter-pin nil)))))
+
+(handlers/register-handler-fx
+ :wallet.ui/sign-transaction-button-clicked
+ (fn [{:keys [db] :as cofx} _]
+   (let [keycard-account? (boolean (get-in db [:account/account :keycard-instance-uid]))]
+     (if keycard-account?
+       (send-keycard-transaction cofx)
+       {:db (assoc-in db [:wallet :send-transaction :show-password-input?] true)}))))
+
+(handlers/register-handler-fx
+ :wallet.ui/sign-message-button-clicked
+ (fn [{:keys [db]} [_ typed? screen-params password-error-cb]]
+   (let [{:keys [data from password]} screen-params
+         keycard-account? (boolean (get-in db [:account/account :keycard-instance-uid]))]
+     (if keycard-account?
+       (if typed?
+         {::hash-typed-data {:data         data
+                             :on-completed #(re-frame/dispatch [::hash-message-completed (types/json->clj %)])}}
+         {::hash-message {:message      (ethereum/naked-address data)
+                          :on-completed #(re-frame/dispatch [::hash-message-completed (types/json->clj %)])}})
+       (if typed?
+         {::sign-typed-data {:data     data
+                             :password password
+                             :account  from
+                             :on-completed #(re-frame/dispatch [::sign-message-completed
+                                                                screen-params
+                                                                (types/json->clj %)
+                                                                password-error-cb])}}
+         {::sign-message {:params       {:data     data
+                                         :password (security/safe-unmask-data password)
+                                         :account  from}
+                          :on-completed #(re-frame/dispatch [::sign-message-completed
+                                                             screen-params
+                                                             (types/json->clj %)
+                                                             password-error-cb])}})))))

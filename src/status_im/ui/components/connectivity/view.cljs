@@ -38,7 +38,6 @@
     [react/view {:style {:width parent-width
                          :position :absolute
                          :top -3
-                         :elevation 2
                          :height 3
                          :background-color colors/white}}
      [react/animated-view {:style {:margin-left anim-x
@@ -93,22 +92,28 @@
                    connected? connecting? loading-indicator?] :as opts}]
         (when (or (not connected?)
                   @show-connected?)
-          [react/animated-view {:style (styles/text-wrapper
-                                        (assoc opts
-                                               :height anim-height
-                                               :background-color (if connected?
-                                                                   colors/green
-                                                                   colors/gray)
-                                               :opacity anim-opacity
-                                               :modal? (= view-id :chat-modal)))
+          [react/animated-view {:style               (styles/text-wrapper
+                                                      (assoc opts
+                                                             :height anim-height
+                                                             :background-color (if connected?
+                                                                                 colors/green
+                                                                                 colors/gray)
+                                                             :opacity anim-opacity
+                                                             :modal? (= view-id :chat-modal)))
                                 :accessibility-label :connection-status-text}
            (when connecting?
-             [react/activity-indicator {:animated true
-                                        :color colors/white
+             [react/activity-indicator {:animated     true
+                                        :color        colors/white
                                         :margin-right 6}])
-           [react/text {:style    styles/text
-                        :on-press on-press-fn}
-            message]]))})))
+           (if (= message :mobile-network)
+             [react/nested-text {:style    styles/text
+                                 :on-press on-press-fn}
+              (i18n/label :t/waiting-for-wifi) " "
+              [{:style {:text-decoration-line :underline}}
+               (i18n/label :t/waiting-for-wifi-change)]]
+             [react/text {:style    styles/text
+                          :on-press on-press-fn}
+              (i18n/label message)])]))})))
 
 (defview connectivity-view []
   (letsubs [status-properties [:connectivity/status-properties]

@@ -14,7 +14,8 @@
             [status-im.utils.config :as config]
             [status-im.utils.fx :as fx]
             [taoensso.timbre :as log]
-            [status-im.utils.platform :as platform]))
+            [status-im.utils.platform :as platform]
+            [status-im.constants :as constants]))
 
 ;; TODO(yenda) investigate why `handle-universal-link` event is
 ;; dispatched 7 times for the same link
@@ -44,7 +45,11 @@
 
 (defn universal-link? [url]
   (boolean
-   (re-matches #"((^https?://get.status.im/)|(^status-im://))[\x00-\x7F]+$" url)))
+   (re-matches constants/regx-universal-link url)))
+
+(defn deep-link? [url]
+  (boolean
+   (re-matches constants/regx-deep-link url)))
 
 (defn open! [url]
   (log/info "universal-links:  opening " url)
@@ -60,7 +65,7 @@
 
 (fx/defn handle-public-chat [cofx public-chat]
   (log/info "universal-links: handling public chat" public-chat)
-  (chat/start-public-chat cofx public-chat {:navigation-reset? true}))
+  (chat/start-public-chat cofx public-chat {}))
 
 (fx/defn handle-view-profile [{:keys [db] :as cofx} public-key]
   (log/info "universal-links: handling view profile" public-key)

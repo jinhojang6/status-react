@@ -30,10 +30,6 @@
              :chats                              {}
              :current-chat-id                    nil
              :selected-participants              #{}
-             :discoveries                        {}
-             :discover-search-tags               #{}
-             :discover-current-dapp              {}
-             :tags                               []
              :sync-state                         :done
              :app-state                          "active"
              :wallet.transactions                constants/default-wallet-transactions
@@ -41,6 +37,7 @@
              :wallet/all-tokens                  {}
              :prices                             {}
              :peers-count                        0
+             :node-info                          {}
              :peers-summary                      []
              :notifications                      {}
              :semaphores                         #{}
@@ -50,7 +47,7 @@
              :transport/chats                    {}
              :transport/filters                  {}
              :transport/message-envelopes        {}
-             :mailserver/mailservers             fleet/default-mailservers
+             :mailserver/mailservers             (fleet/default-mailservers {})
              :mailserver/topics                  {}
              :mailserver/pending-requests        0
              :chat/cooldowns                     0
@@ -63,6 +60,8 @@
              :dimensions/window                  (dimensions/window)
              :push-notifications/stored          {}
              :registry                           {}
+             :stickers/packs-owned               #{}
+             :stickers/packs-pendning            #{}
              :hardwallet                         {:nfc-supported? false
                                                   :nfc-enabled?   false
                                                   :pin            {:original     []
@@ -132,8 +131,6 @@
 (spec/def :navigation.screen-params.edit-contact-group/group-type (spec/nilable any?))
 (spec/def :navigation.screen-params/edit-contact-group (spec/keys :opt-un [:navigation.screen-params.edit-contact-group/group
                                                                            :navigation.screen-params.edit-contact-group/group-type]))
-(spec/def :navigation.screen-params.dapp-description/dapp :new/open-dapp)
-(spec/def :navigation.screen-params/dapp-description map?)
 
 (spec/def :navigation.screen-params/collectibles-list map?)
 
@@ -147,7 +144,6 @@
                                                                       :navigation.screen-params/qr-scanner
                                                                       :navigation.screen-params/group-contacts
                                                                       :navigation.screen-params/edit-contact-group
-                                                                      :navigation.screen-params/dapp-description
                                                                       :navigation.screen-params/collectibles-list
                                                                       :navigation.screen-params/show-extension
                                                                       :navigation.screen-params/selection-modal-screen
@@ -162,6 +158,7 @@
 (spec/def ::network (spec/nilable string?))
 (spec/def ::chain (spec/nilable string?))
 (spec/def ::peers-count (spec/nilable integer?))
+(spec/def ::node-info (spec/nilable map?))
 (spec/def ::peers-summary (spec/nilable vector?))
 
 (spec/def ::collectible (spec/nilable map?))
@@ -195,9 +192,12 @@
 (spec/def ::hardwallet (spec/nilable map?))
 
 (spec/def :stickers/packs (spec/nilable map?))
+(spec/def :stickers/packs-owned (spec/nilable set?))
+(spec/def :stickers/packs-pendning (spec/nilable set?))
 (spec/def :stickers/packs-installed (spec/nilable map?))
 (spec/def :stickers/selected-pack (spec/nilable any?))
 (spec/def :stickers/recent (spec/nilable vector?))
+(spec/def :extensions/profile (spec/nilable any?))
 
 (spec/def ::db (spec/keys :opt [:contacts/contacts
                                 :contacts/dapps
@@ -270,8 +270,11 @@
                                 :stickers/packs-installed
                                 :stickers/selected-pack
                                 :stickers/recent
+                                :stickers/packs-owned
+                                :stickers/packs-pendning
                                 :bottom-sheet/show?
-                                :bottom-sheet/view]
+                                :bottom-sheet/view
+                                :extensions/profile]
                           :opt-un [::modal
                                    ::was-modal?
                                    ::rpc-url
@@ -285,6 +288,7 @@
                                    ::tab-bar-visible?
                                    ::network-status
                                    ::peers-count
+                                   ::node-info
                                    ::peers-summary
                                    ::sync-state
                                    ::sync-data
@@ -323,12 +327,6 @@
                                    :chat/bot-db
                                    :chat/id->command
                                    :chat/access-scope->command-id
-                                   :discoveries/discoveries
-                                   :discoveries/discover-search-tags
-                                   :discoveries/discover-current-dapp
-                                   :discoveries/tags
-                                   :discoveries/current-tag
-                                   :discoveries/request-discoveries-timer
                                    :wallet/wallet
                                    :wallet/wallet.transactions
                                    :wallet/wallet-selected-asset

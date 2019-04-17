@@ -2,7 +2,6 @@
   (:require [cljs.spec.alpha :as spec]
             [clojure.string :as string]
             [status-im.js-dependencies :as dependencies]))
-
 ;; Utility functions for encoding
 
 (def utils dependencies/web3-utils)
@@ -42,7 +41,11 @@
 
 (defn hex-to-number [x]
   (when x
-    (.toNumber (dependencies/Web3.prototype.toBigNumber (str "0x" x) 16))))
+    (let [hex-x (str "0x" x)]
+      (try
+        (.hexToNumber utils hex-x)
+        (catch :default err
+          (.hexToNumberString utils hex-x))))))
 
 (defn sha3 [s]
   (.sha3 utils (str s)))
@@ -97,9 +100,7 @@
         encoded-value  (if encoded-value?
                          (subs value 2)
                          (from-utf8 value))]
-    (str (when dynamic? (enc {:type :int :value (if encoded-value?
-                                                  (count encoded-value)
-                                                  (/ (count encoded-value) 2))}))
+    (str (when dynamic? (enc {:type :int :value (/ (count encoded-value) 2)}))
          (right-pad encoded-value))))
 
 ;; string: enc(X) = enc(enc_utf8(X)), i.e. X is utf-8 encoded and this
@@ -330,7 +331,7 @@
     (conj (butlast (:coll (reduce offset-reducer {:cnt 0 :coll []} lengths))) 0)))
 
 (defn hex-to-bytes [hex]
-  (let [len (* (.toNumber (.toBN utils (subs hex 0 64))) 2)]
+  (let [len (* (hex-to-number (subs hex 0 64)) 2)]
     (substr hex 64 len)))
 
 (defn dyn-hex-to-value [hex type]
@@ -389,5 +390,9 @@
         (hex-to-value val type)))))
 
 (defn decode [bytes types]
-  (let [offsets (get-offsets types)]
-    (map (dec-type bytes) offsets types)))
+  (when bytes
+    (let [bytes (subs bytes 2)]
+      (when-not (empty? bytes)
+        (let [offsets (get-offsets types)]
+          (map #(when-not (= "0x" %) %)
+               (map (dec-type bytes) offsets types)))))))

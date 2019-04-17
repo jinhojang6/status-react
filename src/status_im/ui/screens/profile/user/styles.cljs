@@ -12,10 +12,6 @@
 (def share-contact-code-button
   {:height 42})
 
-(def qr-toolbar
-  {:border-bottom-color colors/gray-light
-   :border-bottom-width 1})
-
 (def qr-code
   {:background-color colors/white})
 
@@ -27,8 +23,7 @@
   {:margin-top    12
    :margin-bottom 16})
 
-(defstyle my-profile-info-container
-  {:background-color colors/white})
+(defstyle my-profile-info-container {})
 
 (defstyle my-profile-settings-logout-wrapper
   {:flex-direction  :row
@@ -66,9 +61,7 @@
    :align-items    :center})
 
 (def advanced-button-label
-  {:font-size      15
-   :letter-spacing -0.2
-   :color          colors/blue})
+  {:color colors/blue})
 
 (def pair-button
   {:margin-left 32})

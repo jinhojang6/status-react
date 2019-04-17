@@ -5,9 +5,7 @@
 ;; Main section
 
 (defstyle main-section
-  {:flex    1
-   :android {:background-color colors/white}
-   :ios     {:background-color colors/blue}})
+  {:flex 1})
 
 (defstyle scroll-bottom
   {:background-color colors/white
@@ -18,54 +16,35 @@
    :android          {:height 0}
    :ios              {:height 9999}})
 
-(def section
-  {:background-color colors/blue})
-
 (def backup-seed-phrase-container
-  {:flex-direction   :row
-   :align-items      :center
-   :border-radius    8
-   :margin           16
-   :background-color colors/black-transparent
-   :padding-top      10
-   :padding-bottom   10
-   :padding-left     14
-   :padding-right    12})
-
-(def backup-seed-phrase-text-container
-  {:flex 1})
+  {:flex-direction     :row
+   :background-color   colors/black-transparent
+   :margin             16
+   :border-radius      8
+   :padding-top        10
+   :padding-bottom     10
+   :padding-horizontal 16})
 
 (def backup-seed-phrase-title
-  {:font-size   15
-   :line-height 20
-   :color       colors/white})
+  {:color colors/white})
 
 (def backup-seed-phrase-description
-  {:line-height 20
-   :color       colors/white-transparent})
-
-(def total-balance-container
-  {:align-items     :center
-   :justify-content :center
-   :padding-top     49
-   :padding-bottom  38})
-
-(def total-balance
-  {:flex-direction :row})
-
-(def total-balance-value
-  {:font-size   32
-   :font-weight :bold
-   :color       colors/white})
-
-(def total-balance-tilde
   {:color colors/white-transparent})
 
-(defstyle total-balance-currency
-  {:font-size   32
-   :font-weight :bold
-   :margin-left 6
-   :color       colors/white-transparent})
+(def total-balance-text
+  {:text-align       :center
+   :padding-top      49
+   :padding-bottom   38
+   :background-color colors/blue
+   :color            colors/white-transparent
+   :font-size        32})
+
+(def total-balance-value
+  {:font-weight "700"
+   :color       colors/white})
+
+(def total-balance-currency
+  {:font-weight "700"})
 
 (def snackbar-container
   {:background-color colors/gray})
@@ -77,9 +56,6 @@
    :text-align        :center})
 
 ;; Actions section
-
-(def action-section
-  {:background-color colors/blue})
 
 (def action
   {:background-color colors/white-transparent
@@ -98,14 +74,12 @@
 ;; Assets section
 
 (def asset-section
-  {:flex             1
-   :padding-top      5
-   :padding-bottom   20
-   :background-color colors/white})
+  {:flex           1
+   :padding-top    5
+   :padding-bottom 20})
 
 (def asset-section-header
-  {:font-size     15
-   :color         colors/gray
+  {:color         colors/gray
    :margin-left   16
    :margin-top    7
    :margin-bottom 3})
@@ -123,8 +97,7 @@
 
 (def asset-item-value
   {:flex      -1
-   :font-size 16
-   :color     colors/black})
+   :font-size 16})
 
 (def asset-item-currency
   {:font-size   16
@@ -137,18 +110,13 @@
    :margin-left 6})
 
 (def wallet-address
-  {:color          :white
-   :text-align     :center
-   :font-size      15
-   :letter-spacing -0.2
-   :line-height    20})
+  {:color       colors/white
+   :text-align  :center})
 
 (def address-section
-  (merge
-   section
-   {:flex-grow   1
-    :align-items :center
-    :padding     20}))
+  {:flex-grow   1
+   :align-items :center
+   :padding     20})
 
 (def modal-history
   {:flex             1

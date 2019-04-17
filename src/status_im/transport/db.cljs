@@ -2,6 +2,7 @@
  status-im.transport.db
   (:require [cljs.spec.alpha :as spec]
             [clojure.string :as s]
+            [clojure.set :as sets]
             status-im.contact.db
             [status-im.utils.config :as config]
             [status-im.utils.clocks :as utils.clocks]
@@ -24,6 +25,17 @@
                                         :chat-id :global/not-empty-string))
 (spec/def :transport/filter any?)
 
+(spec/def :pairing/pending? boolean?)
+(spec/def :pairing/contact (spec/keys  :req-un [:contact/public-key
+                                                :contact/name
+                                                :contact/address]
+                                       :opt-un [:contact/system-tags
+                                                :contact/last-updated
+                                                :contact/last-online
+                                                :contact/fcm-token
+                                                :pairing/pending?
+                                                :contact/tags]))
+(spec/def :pairing/contacts (spec/nilable (spec/map-of :global/not-empty-string :pairing/contact)))
 (spec/def :pairing/installation-id :global/not-empty-string)
 (spec/def :pairing/device-type :global/not-empty-string)
 
@@ -64,6 +76,7 @@
 (spec/def :message.content/response-to-v2 string?)
 (spec/def :message.content/command-path (spec/tuple string? (spec/coll-of (spec/or :scope keyword? :chat-id string?) :kind set? :min-count 1)))
 (spec/def :message.content/uri (spec/and string? (complement s/blank?)))
+(spec/def :message.content/pack (spec/and string? (complement s/blank?)))
 (spec/def :message.content/params (spec/map-of keyword? any?))
 
 (spec/def ::content-type #{constants/content-type-text constants/content-type-command
@@ -91,7 +104,7 @@
 (spec/def :message/message-seen (spec/keys :req-un [:message/ids]))
 
 (spec/def :message/group-membership-update (spec/keys :req-un [:group-chat/membership-updates :group-chat/chat-id]))
-(spec/def :message/sync-installation (spec/keys :req-un [:contacts/contacts]))
+(spec/def :message/sync-installation (spec/keys :req-un [:pairing/contacts]))
 (spec/def :message/pair-installation (spec/keys :req-un [:pairing/installation-id
                                                          :pairing/device-type]))
 
@@ -132,4 +145,4 @@
                                              chat-id)
                                         topic))
                                     (get db :transport/chats))))]
-    (= chats filters)))
+    (empty? (sets/difference chats filters))))

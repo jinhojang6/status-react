@@ -111,7 +111,8 @@ void RCTStatus::startNode(QString configString) {
     configJSON["KeyStoreDir"] = rootDir.absoluteFilePath("keystore");
     configJSON["LogFile"] = d_gethLogFilePath;
 
-    shhextConfig["BackupDisabledDataDir"] = absDataDirPath;
+    shhextConfig["BackupDisabledDataDir"] = rootDirPath;
+
     configJSON["ShhExtConfig"] = shhextConfig;
 
     const QJsonDocument& updatedJsonDoc = QJsonDocument::fromVariant(configJSON);
@@ -433,4 +434,24 @@ void RCTStatus::updateMailservers(QString enodes, double callbackId) {
             logStatusGoResult("::updateMailservers UpdateMailservers", result);
             d->bridge->invokePromiseCallback(callbackId, QVariantList{result});
         }, enodes, callbackId);
+}
+
+void RCTStatus::getNodesFromContract(QString url, QString address, double callbackId) {
+    Q_D(RCTStatus);
+    qCDebug(RCTSTATUS) << "::getNodesFromContract call - callbackId:" << callbackId;
+    QtConcurrent::run([&](QString url, QString address, double callbackId) {
+            const char* result = GetNodesFromContract(url.toUtf8().data(), address.toUtf8().data());
+            logStatusGoResult("::getNodesFromContract GetNodesFromContract", result);
+            d->bridge->invokePromiseCallback(callbackId, QVariantList{result});
+        }, url, address, callbackId);
+}
+
+void RCTStatus::chaosModeUpdate(bool on, double callbackId) {
+    Q_D(RCTStatus);
+    qCDebug(RCTSTATUS) << "::chaosModeUpdate call - callbackId:" << callbackId;
+    QtConcurrent::run([&](bool on, double callbackId) {
+            const char* result = ChaosModeUpdate(on);
+            logStatusGoResult("::chaosModeUpdate ChaosModeUpdate", result);
+            d->bridge->invokePromiseCallback(callbackId, QVariantList{result});
+        }, on, callbackId);
 }

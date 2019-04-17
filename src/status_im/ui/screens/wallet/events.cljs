@@ -65,12 +65,13 @@
 ;; TODO(oskarth): At some point we want to get list of relevant assets to get prices for
 (re-frame/reg-fx
  :get-prices
- (fn [{:keys [from to mainnet? success-event error-event]}]
+ (fn [{:keys [from to mainnet? success-event error-event chaos-mode?]}]
    (prices/get-prices from
                       to
                       mainnet?
                       #(re-frame/dispatch [success-event %])
-                      #(re-frame/dispatch [error-event %]))))
+                      #(re-frame/dispatch [error-event %])
+                      chaos-mode?)))
 
 (re-frame/reg-fx
  :update-gas-price
@@ -132,6 +133,15 @@
  :update-wallet
  (fn [cofx _]
    (models/update-wallet cofx)))
+
+(handlers/register-handler-fx
+ :update-wallet-and-nav-back
+ (fn [cofx [_ on-close]]
+   (fx/merge cofx
+             (when on-close
+               {:dispatch on-close})
+             (navigation/navigate-back)
+             (models/update-wallet))))
 
 (handlers/register-handler-fx
  :update-transactions
@@ -230,7 +240,7 @@
               (assoc-in db-with-adjusted-gas [:wallet :send-transaction :original-gas] adjusted-gas))}))))
 
 (handlers/register-handler-fx
- :wallet-setup-navigate-back
+ :wallet.setup-ui/navigate-back-pressed
  (fn [{:keys [db] :as cofx}]
    (fx/merge cofx
              {:db (assoc-in db [:wallet :send-transaction] {})}

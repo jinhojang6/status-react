@@ -11,7 +11,7 @@ from views.sign_in_view import SignInView
 class TestWalletManagement(SingleDeviceTestCase):
 
     @marks.testrail_id(5335)
-    @marks.critical
+    @marks.high
     def test_wallet_set_up(self):
         sign_in = SignInView(self.driver)
         sign_in.create_user()
@@ -90,7 +90,7 @@ class TestWalletManagement(SingleDeviceTestCase):
         deselect_asset = 'STT'
         wallet.asset_checkbox_by_name(select_asset).click()
         wallet.asset_checkbox_by_name(deselect_asset).click()
-        wallet.done_button.click()
+        wallet.cross_icon.click()
         wallet.asset_by_name(select_asset).scroll_to_element()
         if not wallet.asset_by_name(select_asset).is_element_displayed():
             self.errors.append('%s asset is not shown in wallet' % select_asset)
@@ -131,7 +131,7 @@ class TestWalletManagement(SingleDeviceTestCase):
         wallet.manage_assets_button.click()
         asset_name = 'CryptoKitties'
         wallet.asset_checkbox_by_name(asset_name).click()
-        wallet.done_button.click()
+        wallet.cross_icon.click()
         send_transaction = wallet.send_transaction_button.click()
         send_transaction.select_asset_button.click()
         if send_transaction.asset_by_name(asset_name).is_element_displayed():

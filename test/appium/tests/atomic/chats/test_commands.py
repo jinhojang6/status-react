@@ -25,7 +25,7 @@ class TestCommandsMultipleDevices(MultipleDeviceTestCase):
 
         device_1_wallet_view = device_1_home.wallet_button.click()
         device_1_wallet_view.set_up_wallet()
-        device_1_wallet_view.get_back_to_home_view()
+        device_1_wallet_view.home_button.click()
 
         public_key = device_2_home.get_public_key()
         device_2_profile = device_2_home.get_profile_view()
@@ -110,6 +110,8 @@ class TestCommandsMultipleDevices(MultipleDeviceTestCase):
 
         if send_transaction_view.amount_edit_box.is_element_displayed():
             self.errors.append('Amount field is editable')
+
+        chat_1.driver.swipe(500, 1000, 500, 500)
 
         send_transaction_view.advanced_button.click()
         send_transaction_view.transaction_fee_button.click()
@@ -341,7 +343,7 @@ class TestCommandsMultipleDevices(MultipleDeviceTestCase):
 class TestCommandsSingleDevices(SingleDeviceTestCase):
 
     @marks.testrail_id(5349)
-    @marks.critical
+    @marks.high
     def test_send_request_not_enabled_tokens(self):
         sign_in = SignInView(self.driver)
         home = sign_in.create_user()
@@ -373,7 +375,7 @@ class TestCommandsSingleDevices(SingleDeviceTestCase):
         chat.check_no_values_in_logcat(password=unique_password)
 
     @marks.testrail_id(5347)
-    @marks.critical
+    @marks.high
     def test_send_transaction_details_in_1_1_chat(self):
         recipient = basic_user
         sender = transaction_senders['G']
@@ -394,8 +396,6 @@ class TestCommandsSingleDevices(SingleDeviceTestCase):
 
         if not send_transaction_view.element_by_text(recipient['username']).is_element_displayed():
             self.errors.append('Recipient name is not shown')
-        if not send_transaction_view.element_by_text('0x' + recipient['address']).is_element_displayed():
-            self.errors.append('Recipient address is not shown')
         if not send_transaction_view.element_by_text('ETHro').is_element_displayed():
             self.errors.append("Asset field doesn't contain 'ETHro' text")
         if not send_transaction_view.element_by_text(amount).is_element_displayed():

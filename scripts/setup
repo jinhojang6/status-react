@@ -2,7 +2,7 @@
 
 ########################################################################
 # This install script will setup your development dependencies on OS X
-# or Ubuntu. Ubuntu 16.04 is the only tested version.
+# or Ubuntu. Ubuntu 18.04 is the only tested version.
 #
 # Usage: scripts/setup
 ########################################################################
@@ -13,34 +13,50 @@ source "$_current_dir/lib/setup/path-support.sh"
 source_lib "output.sh"
 source_lib "packages.sh"
 source_lib "platform.sh"
-source_lib "installers.sh"
 
 exit_unless_os_supported
 
-load_nvm_if_available
-load_rvm_if_available
+####
+setup_header "Checking prerequisites..."
+
+if ! program_exists "curl"; then
+  cecho "@b@yellow[[Please install curl before running setup.]]"
+  exit 1
+fi
+
+if is_linux && [ -z "$CI_ENVIRONMENT" ]; then
+  watches=$(cat /proc/sys/fs/inotify/max_user_watches)
+  required_watches=524288
+  if [ $watches -lt $required_watches ]; then
+    cecho "@b@cyan[[fs.inotify.max_user_watches limit is too low ($watches), increasing it]]"
+    echo fs.inotify.max_user_watches=$required_watches | sudo tee -a /etc/sysctl.conf
+    sudo sysctl -p
+  fi
+
+  if [ -f "/etc/arch-release" ]; then
+    # Arch Linux
+    userns=$(sysctl -n kernel.unprivileged_userns_clone)
+    if [ "$userns" != '1' ]; then
+      sudo sysctl kernel.unprivileged_userns_clone=1
+    fi
+  fi
+fi
 
 ####
 setup_header "Installing requirements..."
 
-install_and_setup_package_manager
-install_wget
-install_java8
-install_clojure_cli
-install_leiningen
-install_nsis
-install_node
-install_yarn
-install_watchman
-install_react_native_cli
-install_android_sdk
-install_android_ndk
-install_maven
-install_cocoapods
+if ! program_exists nix; then
+  required_version=$(toolversion nix)
+  NIX_INSTALLER_NO_MODIFY_PROFILE=1 bash <(curl https://nixos.org/releases/nix/nix-${required_version}/install) --no-daemon
+  if [ $? -eq 0 ]; then
+    echo -e "${YELLOW}**********************************************************************************************************"
+    echo "The Nix package manager was successfully installed."
+    echo -e "**********************************************************************************************************${NC}"
+  else
+    echo "Please see https://nixos.org/nix/manual/#chap-installation"
+    exit
+  fi
+fi
 
 ####
-echo && setup_header "Installing dependencies..."
-
-dependency_setup make prepare-mobile
-
 setup_complete

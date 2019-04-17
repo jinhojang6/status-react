@@ -38,19 +38,10 @@
   (merge {:border-color border-color}
          (border position)))
 
-(defstyle button-text
-  {:font-weight        :normal
-   :color              colors/white
+(def button-text
+  {:color              colors/white
    :padding-horizontal 16
-   :desktop            {:font-size        14
-                        :padding-vertical 10
-                        :letter-spacing   0.5}
-   :android            {:font-size        14
-                        :padding-vertical 10
-                        :letter-spacing   0.5}
-   :ios                {:font-size        15
-                        :padding-vertical 9
-                        :letter-spacing   -0.2}})
+   :padding-vertical   10})
 
 (defstyle button-text-disabled
   {:android {:opacity 0.4}
@@ -94,8 +85,7 @@
    :align-items     :center})
 
 (def button-with-icon-text
-  {:color     colors/blue
-   :font-size 15})
+  {:color colors/blue})
 
 (def button-with-icon-image-container
   {:border-radius   50

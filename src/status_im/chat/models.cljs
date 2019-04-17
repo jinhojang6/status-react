@@ -4,8 +4,10 @@
             [status-im.data-store.chats :as chats-store]
             [status-im.data-store.messages :as messages-store]
             [status-im.data-store.user-statuses :as user-statuses-store]
+            [status-im.contact-code.core :as contact-code]
             [status-im.i18n :as i18n]
             [status-im.transport.chat.core :as transport.chat]
+            [status-im.transport.utils :as transport.utils]
             [status-im.transport.message.protocol :as protocol]
             [status-im.transport.message.public-chat :as public-chat]
             [status-im.ui.components.colors :as colors]
@@ -27,6 +29,9 @@
    (:group-chat chat))
   ([cofx chat-id]
    (multi-user-chat? (get-chat cofx chat-id))))
+
+(def one-to-one-chat?
+  (complement multi-user-chat?))
 
 (defn public-chat?
   ([chat]
@@ -50,6 +55,22 @@
   "Toggles chat ui prop in active chat"
   [{:keys [current-chat-id] :as db} ui-element]
   (update-in db [:chat-ui-props current-chat-id ui-element] not))
+
+(defn join-time-messages-checked
+  "The key :might-have-join-time-messages? in public chats signals that
+  the public chat is freshly (re)created and requests for messages to the
+  mailserver for the topic has not completed yet. Likewise, the key
+  :join-time-mail-request-id is associated a little bit after, to signal that
+  the request to mailserver was a success. When request is signalled complete
+  by mailserver, corresponding event :chat.ui/join-time-messages-checked
+  dissociates these two fileds via this function, thereby signalling that the
+  public chat is not fresh anymore."
+  [{:keys [chats] :as db} chat-id]
+  (if (:might-have-join-time-messages? (get chats chat-id))
+    (-> db
+        (update-in [:chats chat-id] dissoc :join-time-mail-request-id)
+        (update-in [:chats chat-id] dissoc :might-have-join-time-messages?))
+    db))
 
 (defn- create-new-chat
   [chat-id {:keys [db now]}]
@@ -79,14 +100,15 @@
   "Adds new public group chat to db & realm"
   [cofx topic]
   (upsert-chat cofx
-               {:chat-id                      topic
-                :is-active                    true
-                :name                         topic
-                :group-chat                   true
-                :contacts                     #{}
-                :public?                      true
-                :unviewed-messages-count      0
-                :loaded-unviewed-messages-ids #{}}))
+               {:chat-id                        topic
+                :is-active                      true
+                :name                           topic
+                :group-chat                     true
+                :contacts                       #{}
+                :public?                        true
+                :might-have-join-time-messages? true
+                :unviewed-messages-count        0
+                :loaded-unviewed-messages-ids   #{}}))
 
 (fx/defn add-group-chat
   "Adds new private group chat to db & realm"
@@ -142,6 +164,8 @@
                (transport.chat/unsubscribe-from-chat % chat-id))
             (deactivate-chat chat-id)
             (clear-history chat-id)
+            #(when (one-to-one-chat? % chat-id)
+               (contact-code/stop-listening % chat-id))
             (navigation/navigate-to-cofx :home {})))
 
 (fx/defn send-messages-seen
@@ -217,10 +241,13 @@
 (fx/defn preload-chat-data
   "Takes chat-id and coeffects map, returns effects necessary when navigating to chat"
   [{:keys [db] :as cofx} chat-id]
-  (fx/merge cofx
-            {:db (-> (assoc db :current-chat-id chat-id)
-                     (set-chat-ui-props {:validation-messages nil}))}
-            (mark-messages-seen chat-id)))
+  (let [chat (get-in db [:chats chat-id])]
+    (fx/merge cofx
+              {:db (-> (assoc db :current-chat-id chat-id)
+                       (set-chat-ui-props {:validation-messages nil}))}
+              (contact-code/listen-to-chat chat-id)
+              (when platform/desktop?
+                (mark-messages-seen chat-id)))))
 
 (fx/defn navigate-to-chat
   "Takes coeffects map and chat-id, returns effects necessary for navigation and preloading data"

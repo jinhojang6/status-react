@@ -33,15 +33,6 @@
   (let [dapp-permissions (into {} (map #(vector (:dapp %) %) all-dapp-permissions))]
     {:db (assoc db :dapps/permissions dapp-permissions)}))
 
-(fx/defn navigate-to-browser
-  [{{:keys [view-id]} :db :as cofx}]
-  (if (= view-id :dapp-description)
-    (navigation/navigate-reset cofx
-                               {:index   1
-                                :actions [{:routeName :home}
-                                          {:routeName :browser}]})
-    (navigation/navigate-to-cofx cofx :browser nil)))
-
 (fx/defn update-browser-option
   [{:keys [db]} option-key option-value]
   {:db (assoc-in db [:browser/options option-key] option-value)})
@@ -83,26 +74,21 @@
   (let [history-host (http/url-host (try (nth history history-index) (catch js/Error _)))]
     (cond-> browser history-host (assoc :unsafe? (dependencies/phishing-detect history-host)))))
 
-(def ipfs-proto-code "e3")
-(def swarm-proto-code "e4")
-
 (defn resolve-ens-content-callback [hex]
   (let [hash (when hex (multihash/base58 (multihash/create :sha2-256 (subs hex 2))))]
     (if (and hash (not= hash resolver/default-hash))
-      (re-frame/dispatch [:browser.callback/resolve-ens-multihash-success ipfs-proto-code hash])
+      (re-frame/dispatch [:browser.callback/resolve-ens-multihash-success constants/ipfs-proto-code hash])
       (re-frame/dispatch [:browser.callback/resolve-ens-contenthash]))))
 
 (defn resolve-ens-contenthash-callback [hex]
-  (let [proto-code (subs hex 2 4)
+  (let [proto-code (when hex (subs hex 2 4))
         hash (when hex (multihash/base58 (multihash/create :sha2-256 (subs hex 12))))]
-    ;; We only support IPFS and SWARM
-    ;; TODO Once more implementations / providers are published this will have to be improved
-    (if (and ((#{swarm-proto-code ipfs-proto-code} proto-code) hash (not= hash resolver/default-hash)))
+    (if (and proto-code (#{constants/swarm-proto-code constants/ipfs-proto-code} proto-code) hash (not= hash resolver/default-hash))
       (re-frame/dispatch [:browser.callback/resolve-ens-multihash-success proto-code hash])
       (re-frame/dispatch [:browser.callback/resolve-ens-multihash-error]))))
 
 (fx/defn resolve-url
-  [{{:keys [web3 network] :as db} :db} {:keys [error? resolved-url]}]
+  [{{:keys [network] :as db} :db} {:keys [error? resolved-url]}]
   (when (not error?)
     (let [current-url (get-current-url (get-current-browser db))
           host (http/url-host current-url)]
@@ -110,22 +96,20 @@
         (let [network (get-in db [:account/account :networks network])
               chain   (ethereum/network->chain-keyword network)]
           {:db                            (update db :browser/options assoc :resolving? true)
-           :browser/resolve-ens-content {:web3     web3
-                                         :registry (get ens/ens-registries
+           :browser/resolve-ens-content {:registry (get ens/ens-registries
                                                         chain)
                                          :ens-name host
                                          :cb       resolve-ens-content-callback}})
         {:db (update db :browser/options assoc :url (or resolved-url current-url) :resolving? false)}))))
 
 (fx/defn resolve-ens-contenthash
-  [{{:keys [web3 network] :as db} :db}]
+  [{{:keys [network] :as db} :db}]
   (let [current-url (get-current-url (get-current-browser db))
         host (http/url-host current-url)]
     (let [network (get-in db [:account/account :networks network])
           chain   (ethereum/network->chain-keyword network)]
       {:db                            (update db :browser/options assoc :resolving? true)
-       :browser/resolve-ens-contenthash {:web3     web3
-                                         :registry (get ens/ens-registries
+       :browser/resolve-ens-contenthash {:registry (get ens/ens-registries
                                                         chain)
                                          :ens-name host
                                          :cb       resolve-ens-contenthash-callback}})))
@@ -179,7 +163,7 @@
   (let [current-url (get-current-url (get-current-browser db))
         host (http/url-host current-url)
         path  (subs current-url (+ (.indexOf current-url host) (count host)))
-        gateway (if (= ipfs-proto-code proto-code)
+        gateway (if (= constants/ipfs-proto-code proto-code)
                   (let [base32hash (-> (.encode js-dependencies/hi-base32 (alphabase.base58/decode hash))
                                        (string/replace #"=" "")
                                        (string/lower-case))]
@@ -215,11 +199,6 @@
     (utils.universal-links/handle-url cofx link)
     {:browser/show-browser-selection link}))
 
-(fx/defn handle-universal-link
-  [cofx link]
-  (when (utils.universal-links/universal-link? link)
-    (utils.universal-links/handle-url cofx link)))
-
 (fx/defn update-browser-on-nav-change
   [cofx url error?]
   (let [browser (get-current-browser (:db cofx))
@@ -231,7 +210,6 @@
         (fx/merge cofx
                   (update-browser-history browser resolved-url)
                   (handle-pdf url)
-                  (handle-universal-link url)
                   (resolve-url {:error? error? :resolved-url (when resolved-ens url)}))))))
 
 (fx/defn update-browser-name
@@ -242,24 +220,29 @@
 
 (fx/defn navigation-state-changed
   [cofx event error?]
-  (let [{:strs [url loading title]} (js->clj event)]
-    (fx/merge cofx
-              (update-browser-option :loading? loading)
-              (update-browser-name title)
-              (update-browser-on-nav-change url error?))))
+  (let [{:strs [url loading title]} (js->clj event)
+        deep-link? (utils.universal-links/deep-link? url)]
+    (if (utils.universal-links/universal-link? url)
+      (when-not (and deep-link? platform/ios?) ;; ios webview handles this
+        (utils.universal-links/handle-url cofx url))
+      (fx/merge cofx
+                (update-browser-option :loading? loading)
+                (update-browser-name title)
+                (update-browser-on-nav-change url error?)))))
 
 (fx/defn open-url-in-current-browser
   "Opens a url in the current browser, which mean no new entry is added to the home page
   and history of the current browser is updated so that the user can navigate back to the
   origin url"
-  ;; TODO(yenda) is that desirable ?
   [cofx url]
   (let [browser (get-current-browser (:db cofx))
         normalized-url (http/normalize-and-decode-url url)]
-    (fx/merge cofx
-              (update-browser-option :url-editing? false)
-              (update-browser-history browser normalized-url)
-              (resolve-url nil))))
+    (if (utils.universal-links/universal-link? normalized-url)
+      (utils.universal-links/handle-url cofx normalized-url)
+      (fx/merge cofx
+                (update-browser-option :url-editing? false)
+                (update-browser-history browser normalized-url)
+                (resolve-url nil)))))
 
 (fx/defn open-url
   "Opens a url in the browser. If a host can be extracted from the url and
@@ -271,12 +254,14 @@
         browser {:browser-id    (or host (random/id))
                  :history-index 0
                  :history       [normalized-url]}]
-    (fx/merge cofx
-              {:db (assoc db :browser/options
-                          {:browser-id (:browser-id browser)})}
-              (navigate-to-browser)
-              (update-browser browser)
-              (resolve-url nil))))
+    (if (utils.universal-links/universal-link? normalized-url)
+      (utils.universal-links/handle-url cofx normalized-url)
+      (fx/merge cofx
+                {:db (assoc db :browser/options
+                            {:browser-id (:browser-id browser)})}
+                (navigation/navigate-to-cofx :browser nil)
+                (update-browser browser)
+                (resolve-url nil)))))
 
 (fx/defn open-existing-browser
   "Opens an existing browser with it's history"
@@ -291,8 +276,8 @@
 
 (fx/defn web3-send-async
   [{:keys [db]} {:keys [method] :as payload} message-id]
-  (if (or (= method constants/web3-send-transaction)
-          (= method constants/web3-personal-sign))
+  (if (or (= constants/web3-send-transaction method)
+          (constants/web3-sign-message? method))
     {:db       (update-in db [:wallet :transactions-queue] conj {:message-id message-id :payload payload})
      ;;TODO(yenda): refactor check-dapps-transactions-queue to remove this dispatch
      :dispatch [:check-dapps-transactions-queue]}
@@ -370,17 +355,17 @@
 (fx/defn open-chat-from-browser
   [cofx host]
   (let [topic (string/lower-case (apply str (map filter-letters-numbers-and-replace-dot-on-dash host)))]
-    {:dispatch [:chat.ui/start-public-chat topic {:modal? true :navigation-reset? true}]}))
+    {:dispatch [:chat.ui/start-public-chat topic nil]}))
 
 (re-frame/reg-fx
  :browser/resolve-ens-content
- (fn [{:keys [web3 registry ens-name cb]}]
-   (resolver/content web3 registry ens-name cb)))
+ (fn [{:keys [registry ens-name cb]}]
+   (resolver/content registry ens-name cb)))
 
 (re-frame/reg-fx
  :browser/resolve-ens-contenthash
- (fn [{:keys [web3 registry ens-name cb]}]
-   (resolver/contenthash web3 registry ens-name cb)))
+ (fn [{:keys [registry ens-name cb]}]
+   (resolver/contenthash registry ens-name cb)))
 
 (re-frame/reg-fx
  :browser/send-to-bridge
@@ -409,4 +394,3 @@
  :browser/show-web-browser-selection
  (fn [link]
    (list-selection/browse-in-web-browser link)))
-

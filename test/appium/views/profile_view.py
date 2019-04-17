@@ -105,14 +105,14 @@ class UserNameSetByUserText(BaseText):
     def __init__(self, driver):
         super(UserNameSetByUserText, self).__init__(driver)
         self.locator = self.Locator.xpath_selector(
-            '//android.widget.ImageView[@content-desc="chat-icon"]/../../android.widget.TextView[1]')
+            '//android.widget.ImageView[@content-desc="chat-icon"]/../android.widget.TextView[1]')
 
 
 class DefaultUserNameText(BaseText):
     def __init__(self, driver):
         super(DefaultUserNameText, self).__init__(driver)
         self.locator = self.Locator.xpath_selector(
-            '//android.widget.ImageView[@content-desc="chat-icon"]/../../android.widget.TextView[2]')
+            '//android.widget.ImageView[@content-desc="chat-icon"]/../android.widget.TextView[2]')
 
 
 class ShareMyProfileButton(BaseButton):
@@ -191,7 +191,7 @@ class OkContinueButton(BaseButton):
 
     def __init__(self, driver):
         super(OkContinueButton, self).__init__(driver)
-        self.locator = self.Locator.xpath_selector("//*[@text='OK, CONTINUE']")
+        self.locator = self.Locator.xpath_selector("//*[@text='Ok, continue']")
 
 
 class RecoveryPhraseTable(BaseText):
@@ -225,7 +225,7 @@ class OkGotItButton(BaseButton):
 
     def __init__(self, driver):
         super(OkGotItButton, self).__init__(driver)
-        self.locator = self.Locator.text_selector('OK, GOT IT')
+        self.locator = self.Locator.text_selector('Ok, got it')
 
 
 class DebugModeToggle(BaseButton):
@@ -271,8 +271,7 @@ class RopstenChainButton(BaseButton):
 
     def __init__(self, driver):
         super(RopstenChainButton, self).__init__(driver)
-        self.locator = self.Locator.xpath_selector(
-            "//*[contains(@text,'Ropsten test network')]/following-sibling::android.widget.CheckBox[1]")
+        self.locator = self.Locator.xpath_selector("//*[contains(@text,'Ropsten test network')]")
 
 
 class SpecifyNameInput(BaseEditBox):
@@ -332,18 +331,12 @@ class AddBootnodeButton(BaseButton):
         self.locator = self.Locator.xpath_selector("(//*[@content-desc='icon'])[2]")
 
 
-class BootnodeNameInput(BaseEditBox):
-
-    def __init__(self, driver):
-        super(BootnodeNameInput, self).__init__(driver)
-        self.locator = self.Locator.xpath_selector("//android.widget.EditText[@text='Specify a name']")
-
-
 class BootnodeAddressInput(BaseEditBox):
 
     def __init__(self, driver):
         super(BootnodeAddressInput, self).__init__(driver)
-        self.locator = self.Locator.xpath_selector("//android.widget.EditText[@text='Specify bootnode address']")
+        self.locator = self.Locator.xpath_selector(
+            "//*[@text='Bootnode address']/following-sibling::*[1]/android.widget.EditText")
 
 
 class EnableBootnodesToggle(BaseEditBox):
@@ -364,14 +357,26 @@ class MailServerAddressInput(BaseEditBox):
 
     def __init__(self, driver):
         super(MailServerAddressInput, self).__init__(driver)
-        self.locator = self.Locator.xpath_selector("//android.widget.EditText[@text='Specify a mailserver address']")
+        self.locator = self.Locator.xpath_selector(
+            "//*[@text='Mailserver address']/following-sibling::*[1]/android.widget.EditText")
+
+
+class MailServerAutoSelectionButton(BaseButton):
+    def __init__(self, driver):
+        super(MailServerAutoSelectionButton, self).__init__(driver)
+        self.locator = self.Locator.xpath_selector("//*[contains(@text,'Automatic selection')]")
 
 
 class MailServerElement(BaseButton):
 
     def __init__(self, driver, server_name):
         super(MailServerElement, self).__init__(driver)
+        self.server_name = server_name
         self.locator = self.Locator.xpath_selector("//*[@content-desc='mailserver-item']//*[@text='%s']" % server_name)
+
+    def click(self):
+        self.scroll_to_element().click()
+        self.driver.info('Tap on "%s" mailserver value' % self.server_name)
 
 
 class MailServerConnectButton(BaseButton):
@@ -385,7 +390,7 @@ class ActiveNetworkName(BaseText):
 
     def __init__(self, driver):
         super(ActiveNetworkName, self).__init__(driver)
-        self.locator = self.Locator.text_part_selector('WITH UPSTREAM RPC')
+        self.locator = self.Locator.text_part_selector('with upstream RPC')
 
 
 class AboutButton(BaseButton):
@@ -472,6 +477,7 @@ class ProfileView(BaseView):
         self.mail_server_button = MailServerButton(self.driver)
         self.mail_server_address_input = MailServerAddressInput(self.driver)
         self.mail_server_connect_button = MailServerConnectButton(self.driver)
+        self.mail_server_auto_selection_button = MailServerAutoSelectionButton(self.driver)
 
     def switch_network(self, network):
         self.advanced_button.click()
@@ -481,6 +487,7 @@ class ProfileView(BaseView):
         network_button = NetworkSettingsButton.NetworkButton(self.driver, network)
         network_button.click()
         self.connect_button.click()
+        self.confirm_button.click()
         from views.sign_in_view import SignInView
         signin_view = SignInView(self.driver)
         signin_view.sign_in()
@@ -495,12 +502,14 @@ class ProfileView(BaseView):
         self.network_settings_button.scroll_to_element()
         self.network_settings_button.click()
         self.plus_button.click_until_presence_of_element(self.ropsten_chain_button)
-        self.ropsten_chain_button.click()
         self.custom_network_url.send_keys('https://ropsten.infura.io/v3/f315575765b14720b32382a61a89341a')
         self.specify_name_input.send_keys('custom_ropsten')
+        self.ropsten_chain_button.click()
+        self.ropsten_chain_button.click()
         self.save_button.click()
         self.element_by_text_part('custom_ropsten').click_until_presence_of_element(self.connect_button)
         self.connect_button.click()
+        self.confirm_button.click()
         return self.get_sign_in_view()
 
     def get_recovery_phrase(self):
@@ -530,10 +539,11 @@ class ProfileView(BaseView):
         self.edit_picture_button.click()
         self.profile_picture.template = file_name
         self.select_from_gallery_button.click()
-        if self.allow_button.is_element_displayed(sec=10):
+        if self.allow_button.is_element_displayed(sec=5):
             self.allow_button.click()
         picture = self.element_by_text(file_name)
         if not picture.is_element_displayed(2):
+            self.show_roots_button.click()
             for element_text in 'Images', 'DCIM':
                 self.element_by_text(element_text).click()
         picture.click()

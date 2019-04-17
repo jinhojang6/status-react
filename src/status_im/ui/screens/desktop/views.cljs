@@ -43,6 +43,10 @@
                        :desktop/new-group-chat
                        :desktop/new-public-chat
                        :advanced-settings
+                       :edit-mailserver
+                       :bootnodes-settings
+                       :edit-bootnode
+                       :about-app
                        :help-center
                        :installations
                        :chat

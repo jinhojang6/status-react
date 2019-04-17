@@ -8,24 +8,16 @@
 
 (def chat-view
   {:flex             1
-   :background-color colors/gray-lighter})
+   :background-color colors/white})
 
 (def toolbar-container
   {:flex           1
-   :flex-direction :row
-   :align-items    :stretch
-   :margin-left    3})
+   :flex-direction :row})
 
 (def messages-container
   {:flex           1
    :padding-bottom 0
    :margin-bottom  0})
-
-(def toolbar-view
-  {:flex-direction   :row
-   :height           56
-   :background-color colors/white
-   :elevation        2})
 
 (def action
   {:width           56
@@ -50,15 +42,11 @@
 
 (def chat-name-view
   {:flex            1
-   :justify-content :center
-   :margin-bottom   2})
+   :justify-content :center})
 
-(defstyle chat-name-text
-  {:color   colors/black
-   :android {:font-size 15
-             :line-height 20}
-   :ios     {:font-size 16
-             :line-height 22}})
+(def chat-name-text
+  {:typography :main-medium
+   :margin-top -3})
 
 (def group-icon
   {:margin-top    4
@@ -66,18 +54,14 @@
    :width         14
    :height        9})
 
-(defstyle toolbar-subtitle
-  {:color       colors/text-gray
-   :line-height 15
-   :font-size   13
-   :ios         {:margin-top 4}})
+(def toolbar-subtitle
+  {:typography  :caption
+   :color       colors/text-gray})
 
-(defstyle last-activity-text
-  {:color       colors/text-gray
-   :line-height 15
-   :ios         {:font-size  14
-                 :margin-top 4}
-   :android     {:font-size 13}})
+(def last-activity-text
+  {:font-size  14
+   :margin-top 4
+   :color      colors/text-gray})
 
 (defn actions-wrapper [status-bar-height]
   {:background-color colors/white
@@ -179,26 +163,20 @@
   {:color "#888888"})
 
 (def add-contact
-  {:flex-direction   :row
-   :align-items      :center
-   :height           36
-   :background-color :white
-   :justify-content  :space-between})
-
-(def add-contact-left
-  {:width       24
-   :margin-left 12})
+  {:flex-direction      :row
+   :align-items         :center
+   :height              36
+   :border-bottom-width 1
+   :justify-content :center
+   :border-color        colors/gray-lighter})
 
 (def add-contact-center
-  {:flex-direction :row
-   :align-items    :center})
+  {:flex-direction :row})
 
-(defstyle add-contact-text
+(def add-contact-text
   {:text-align          :center
    :text-align-vertical :center
    :padding-left        4
-   :font-size           15
-   :ios                 {:letter-spacing 0.2}
    :color               colors/blue})
 
 (def add-contact-close-icon
@@ -213,9 +191,6 @@
   {:opacity opacity
    :flex    1})
 
-(def empty-chat-container-one-to-one
-  {:margin-top 10})
-
 (def empty-chat-container
   {:flex             1
    :flex-direction   :column
@@ -224,43 +199,75 @@
    :padding-vertical 50
    :margin-right     6})
 
-(def empty-chat-text
-  {:color          colors/gray
-   :width          280
-   :font-size      15
-   :line-height    22
-   :letter-spacing -0.2
-   :text-align     :center})
+(defn intro-header-container
+  [height status no-messages]
+  (let [adjusted-height (if (< height 280) 324 height)]
+    (if (or no-messages (= status (or :loading :empty)))
+      {:flex               1
+       :flex-direction     :column
+       :justify-content    :center
+       :align-items        :center
+       :height             adjusted-height
+       :padding-horizontal 32}
+      {:flex               1
+       :flex-direction     :column
+       :justify-content    :center
+       :align-items        :center
+       :padding-horizontal 32})))
 
-(def empty-chat-text-name
-  {:margin-bottom 5
+(defn intro-header-icon [diameter color]
+  {:width            diameter
+   :height           diameter
+   :align-items      :center
+   :justify-content  :center
+   :border-radius    (/ diameter 2)
+   :background-color color})
+
+(def intro-header-icon-text
+  {:color       colors/white
+   :font-size   52
+   :font-weight "700"
+   :opacity     0.8
+   :line-height 72})
+
+(def intro-header-chat-name
+  {:font-size     22
+   :font-weight   "700"
+   :line-height   28
+   :text-align    :center
+   :margin-bottom 8
    :color         colors/black})
 
-(def join-button
-  {:margin-top    24
-   :margin-bottom 15})
+(def intro-header-description-container
+  {:flex-wrap      :wrap
+   :align-items    :flex-start
+   :flex-direction :row})
+
+(def intro-header-description
+  {:color         colors/gray
+   :line-height   22
+   :text-align    :center})
 
 (def group-chat-icon
   {:color       colors/white
    :font-size   40
-   :font-weight :bold
-   :line-height 55})
+   :font-weight "700"})
 
 (def group-chat-join-footer
-  {:position        :absolute
-   :justify-content :center
-   :margin-bottom   30
-   :bottom          0})
-
-(def group-chat-join-name
-  {:color       :black
-   :font-weight :bold
-   :font-size   22})
+  {:flex            1
+   :justify-content :center})
 
 (def group-chat-join-container
   {:flex            1
    :align-items     :center
    :justify-content :center})
 
+(def group-chat-join-name
+  {:typography :header})
+
+(def join-button
+  {:margin-bottom 15})
+
 (def decline-chat
-  {:color colors/blue})
+  {:color colors/blue
+   :margin-bottom 40})

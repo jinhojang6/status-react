@@ -28,6 +28,32 @@
     :enode "enode://0f7c65277f916ff4379fe520b875082a56e587eb3ce1c1567d9ff94206bdb05ba167c52272f20f634cd1ebdec5d9dfeb393018bfde1595d8e64a717c8b46692f@203.136.241.111:40404"
     :name "Geth/v1.7.2-stable/linux-amd64/go1.9.1"}])
 
+(deftest change-mailserver
+  (testing "we are offline"
+    (testing "it does not change mailserver"
+      (is (not (mailserver/change-mailserver {:db {:peers-count 0}})))))
+  (testing "we are online"
+    (testing "there's a preferred mailserver"
+      (testing "it shows the popup"
+        (is (:ui/show-confirmation (mailserver/change-mailserver
+                                    {:db {:account/account {:settings
+                                                            {:fleet :beta
+                                                             :mailserver {:beta "id"}}}
+                                          :peers-count 1}})))))
+    (testing "there's not a preferred mailserver"
+      (testing "it changes the mailserver"
+        (is (= :a
+               (get-in
+                (mailserver/change-mailserver
+                 {:db {:mailserver/mailservers {:beta {:a "b"}}
+                       :account/account {:settings
+                                         {:fleet :beta}}
+                       :peers-count 1}})
+                [:db :mailserver/current-id]))))
+      (testing "it does not show the popup"
+        (is (not (:ui/show-confirmation (mailserver/change-mailserver
+                                         {:db {:peers-count 1}}))))))))
+
 (deftest test-registered-peer?
   (testing "Peer is registered"
     (is (mailserver/registered-peer? peers enode)))
@@ -313,6 +339,223 @@
                                      [{:id "mailserver-id" :enode "enode://mailserver-id@ip"}]
                                      [])))
 
+(deftest test-resend-request
+  (testing "there's no current request"
+    (is (not (mailserver/resend-request {:db {}} {}))))
+  (testing "there's a current request"
+    (testing "it reached the maximum number of attempts"
+      (testing "it changes mailserver"
+        (is (= :connecting
+               (get-in (mailserver/resend-request
+                        {:db {:mailserver/current-request
+                              {:attempts mailserver/maximum-number-of-attempts}}}
+                        {})
+                       [:db :mailserver/state])))))
+    (testing "it did not reach the maximum number of attempts"
+      (testing "it reached the maximum number of attempts"
+        (testing "it decrease the limit")
+        (is (= {:mailserver/decrease-limit []} (mailserver/resend-request {:db {:mailserver/current-request
+                                                                                {}}}
+                                                                          {})))))))
+
+(deftest test-resend-request-request-id
+  (testing "request-id passed is nil"
+    (testing "it resends the request"
+      (is (mailserver/resend-request {:db {:mailserver/current-request {}}} {}))))
+  (testing "request-id is nil in db"
+    (testing "it resends the request"
+      (is (mailserver/resend-request {:db {:mailserver/current-request {}}}
+                                     {:request-id "a"}))))
+  (testing "request id matches"
+    (testing "it resends the request"
+      (is (mailserver/resend-request {:db {:mailserver/current-request {:request-id "a"}}}
+                                     {:request-id "a"}))))
+  (testing "request id does not match"
+    (testing "it does not resend the request"
+      (is (not (mailserver/resend-request {:db {:mailserver/current-request {:request-id "a"}}}
+                                          {:request-id "b"}))))))
+
+(def cofx-no-pub-topic
+  {:db
+   {:account/account {:public-key "me"}
+    :chats
+    {"chat-id-1" {:is-active                      true
+                  :messages                       {}
+                  :might-have-join-time-messages? true
+                  :group-chat                     true
+                  :public?                        true
+                  :chat-id                        "chat-id-1"}
+     "chat-id-2" {:is-active  true
+                  :messages   {}
+                  :group-chat true
+                  :public?    true
+                  :chat-id    "chat-id-2"}}}})
+
+(def cofx-single-pub-topic
+  {:db
+   {:account/account {:public-key "me"}
+    :chats
+    {"chat-id-1" {:is-active                      true
+                  :messages                       {}
+                  :join-time-mail-request-id      "a"
+                  :might-have-join-time-messages? true
+                  :group-chat                     true
+                  :public?                        true
+                  :chat-id                        "chat-id-1"}
+     "chat-id-2" {:is-active  true
+                  :messages   {}
+                  :group-chat true
+                  :public?    true
+                  :chat-id    "chat-id-2"}}}})
+
+(def cofx-multiple-pub-topic
+  {:db
+   {:account/account {:public-key "me"}
+    :chats
+    {"chat-id-1" {:is-active                      true
+                  :messages                       {}
+                  :join-time-mail-request-id      "a"
+                  :might-have-join-time-messages? true
+                  :group-chat                     true
+                  :public?                        true
+                  :chat-id                        "chat-id-1"}
+     "chat-id-2" {:is-active                      true
+                  :messages                       {}
+                  :join-time-mail-request-id      "a"
+                  :might-have-join-time-messages? true
+                  :group-chat                     true
+                  :public?                        true
+                  :chat-id                        "chat-id-2"}
+     "chat-id-3" {:is-active  true
+                  :messages   {}
+                  :group-chat true
+                  :public?    true
+                  :chat-id    "chat-id-3"}
+     "chat-id-4" {:is-active                      true
+                  :messages                       {}
+                  :join-time-mail-request-id      "a"
+                  :might-have-join-time-messages? true
+                  :group-chat                     true
+                  :public?                        true
+                  :chat-id                        "chat-id-4"}}}})
+
+(def mailserver-completed-event
+  {:requestID "a"
+   :lastEnvelopeHash "0xC0FFEE"
+   :cursor ""
+   :errorMessage ""})
+
+(def mailserver-completed-event-zero-for-envelope
+  {:requestID "a"
+   :lastEnvelopeHash "0x0000000000000000000000000000000000000000000000000000000000000000"
+   :cursor ""
+   :errorMessage ""})
+
+(deftest test-public-chat-related-handling-of-request-completed
+  (testing "Request does not include any public chat topic"
+    (testing "It does not dispatch any event"
+      (is (not (or (contains?
+                    (mailserver/handle-request-completed cofx-no-pub-topic mailserver-completed-event)
+                    :dispatch-n)
+                   (contains?
+                    (mailserver/handle-request-completed cofx-no-pub-topic mailserver-completed-event)
+                    :dispatch-later)))))
+    (testing "It has :mailserver/increase-limit effect"
+      (is (contains? (mailserver/handle-request-completed cofx-no-pub-topic mailserver-completed-event)
+                     :mailserver/increase-limit))))
+  (testing "Request includes one public chat topic"
+    (testing "Event has non-zero envelope"
+      (let [handeled-effects (mailserver/handle-request-completed
+                              cofx-single-pub-topic
+                              mailserver-completed-event)]
+        (testing "It has no :dispatch-n event"
+          (is (not (contains?
+                    handeled-effects
+                    :dispatch-n))))
+        (testing "It has one :dispatch-later event"
+          (is (= 1 (count (get
+                           handeled-effects
+                           :dispatch-later)))))
+        (testing "The :dispatch-later event is :chat.ui/join-time-messages-checked"
+          (is (= :chat.ui/join-time-messages-checked
+                 (-> (get
+                      handeled-effects
+                      :dispatch-later)
+                     first
+                     :dispatch
+                     first))))
+        (testing "The :dispatch-later event argument is the chat-id/topic that the request included"
+          (is (= "chat-id-1"
+                 (-> (get
+                      handeled-effects
+                      :dispatch-later)
+                     first
+                     :dispatch
+                     second))))
+        (testing "It has :mailserver/increase-limit effect"
+          (is (contains? handeled-effects
+                         :mailserver/increase-limit)))))
+    (testing "Event has zero-valued envelope"
+      (let [handeled-effects (mailserver/handle-request-completed
+                              cofx-single-pub-topic
+                              mailserver-completed-event-zero-for-envelope)]
+        (testing "It has one :dispatch-n event"
+          (is (= 1 (count (get
+                           handeled-effects
+                           :dispatch-n)))))
+        (testing "It has no :dispatch-later event"
+          (is (not (contains?
+                    handeled-effects
+                    :dispatch-later))))
+        (testing "The :dispatch-n event is :chat.ui/join-time-messages-checked"
+          (is (= :chat.ui/join-time-messages-checked
+                 (-> (get
+                      handeled-effects
+                      :dispatch-n)
+                     first
+                     first))))
+        (testing "The :dispatch-n event argument is the chat-id/topic that the request included"
+          (is (= "chat-id-1"
+                 (-> (get
+                      handeled-effects
+                      :dispatch-n)
+                     first
+                     second))))
+        (testing "It has :mailserver/increase-limit effect"
+          (is (contains? handeled-effects
+                         :mailserver/increase-limit))))))
+  (testing "Request includes multiple public chat topics (3)"
+    (testing "Event has non-zero envelope"
+      (let [handeled-effects (mailserver/handle-request-completed
+                              cofx-multiple-pub-topic
+                              mailserver-completed-event)]
+        (testing "It has no :dispatch-n event"
+          (is (not (contains?
+                    handeled-effects
+                    :dispatch-n))))
+        (testing "It has one :dispatch-later event"
+          (is (= 3 (count (get
+                           handeled-effects
+                           :dispatch-later)))))
+        (testing "It has :mailserver/increase-limit effect"
+          (is (contains? handeled-effects
+                         :mailserver/increase-limit)))))
+    (testing "Event has zero-valued envelope"
+      (let [handeled-effects (mailserver/handle-request-completed
+                              cofx-multiple-pub-topic
+                              mailserver-completed-event-zero-for-envelope)]
+        (testing "It has one :dispatch-n event"
+          (is (= 3 (count (get
+                           handeled-effects
+                           :dispatch-n)))))
+        (testing "It has no :dispatch-later event"
+          (is (not (contains?
+                    handeled-effects
+                    :dispatch-later))))
+        (testing "It has :mailserver/increase-limit effect"
+          (is (contains? handeled-effects
+                         :mailserver/increase-limit)))))))
+
 (deftest peers-summary-change
   (testing "Mailserver added, sym-key doesn't exist"
     (let [result (peers-summary-change-result false true false)]
@@ -335,6 +578,30 @@
            #{}))
     (is (= (into #{} (keys (peers-summary-change-result true false false)))
            #{}))))
+
+(deftest unpin-test
+  (testing "it removes the preference"
+    (let [db {:mailserver/current-id "mailserverid"
+              :mailserver/mailservers
+              {:eth.beta {"mailserverid" {:address  "mailserver-address"
+                                          :password "mailserver-password"}}}
+              :account/account
+              {:settings {:fleet :eth.beta
+                          :mailserver {:eth.beta "mailserverid"}}}}]
+      (is (not (get-in (mailserver/unpin {:db db})
+                       [:db :account/account :settings :mailserver :eth.beta]))))))
+
+(deftest pin-test
+  (testing "it removes the preference"
+    (let [db {:mailserver/current-id "mailserverid"
+              :mailserver/mailservers
+              {:eth.beta {"mailserverid" {:address  "mailserver-address"
+                                          :password "mailserver-password"}}}
+              :account/account
+              {:settings {:fleet :eth.beta
+                          :mailserver {}}}}]
+      (is (= "mailserverid" (get-in (mailserver/pin {:db db})
+                                    [:db :account/account :settings :mailserver :eth.beta]))))))
 
 (deftest connect-to-mailserver
   (let [db {:mailserver/current-id "mailserverid"
@@ -360,3 +627,187 @@
         (is (not (-> (mailserver/connect-to-mailserver {:db mailserver-with-sym-key-db})
                      :shh/generate-sym-key-from-password
                      first)))))))
+
+(deftest calculate-gap
+  (testing "new topic"
+    (is (= {:gap-from     10
+            :gap-to       10
+            :last-request 10}
+
+           (mailserver/calculate-gap
+            {:gap-from     nil
+             :gap-to       nil
+             :last-request nil}
+            {:request-from 5
+             :request-to   10}))))
+  (testing "calculate-gap#1"
+    (is (= {:gap-from     3
+            :gap-to       4
+            :last-request 5}
+
+           (mailserver/calculate-gap
+            {:gap-from     1
+             :gap-to       2
+             :last-request 3}
+            {:request-from 4
+             :request-to   5}))))
+  (testing "calculate-gap#2"
+    (is (= {:gap-from     1
+            :gap-to       2
+            :last-request 5}
+           (mailserver/calculate-gap
+            {:gap-from     1
+             :gap-to       2
+             :last-request 4}
+            {:request-from 3
+             :request-to   5}))))
+  (testing "calculate-gap#2-1"
+    (is (= {:gap-from     1
+            :gap-to       2
+            :last-request 4}
+           (mailserver/calculate-gap
+            {:gap-from     1
+             :gap-to       2
+             :last-request 3}
+            {:request-from 3
+             :request-to   4}))))
+  (testing "calculate-gap#3"
+    (is (= {:gap-from     1
+            :gap-to       2
+            :last-request 5}
+           (mailserver/calculate-gap
+            {:gap-from     1
+             :gap-to       2
+             :last-request 5}
+            {:request-from 3
+             :request-to   4}))))
+  (testing "calculate-gap#3-1"
+    (is (= {:gap-from     1
+            :gap-to       2
+            :last-request 3}
+           (mailserver/calculate-gap
+            {:gap-from     1
+             :gap-to       2
+             :last-request 3}
+            {:request-from 2
+             :request-to   3}))))
+  (testing "calculate-gap#4"
+    (is (= {:gap-from     1
+            :gap-to       2
+            :last-request 5}
+           (mailserver/calculate-gap
+            {:gap-from     1
+             :gap-to       2
+             :last-request 5}
+            {:request-from 3
+             :request-to   4}))))
+  (testing "calculate-gap#5"
+    (is (= {:gap-from     1
+            :gap-to       4
+            :last-request 5}
+           (mailserver/calculate-gap
+            {:gap-from     1
+             :gap-to       4
+             :last-request 5}
+            {:request-from 2
+             :request-to   3}))))
+  (testing "calculate-gap#6"
+    (is (= {:gap-from     2
+            :gap-to       3
+            :last-request 4}
+           (mailserver/calculate-gap
+            {:gap-from     2
+             :gap-to       3
+             :last-request 4}
+            {:request-from 1
+             :request-to   2}))))
+  (testing "calculate-gap#6-1"
+    (is (= {:gap-from     1
+            :gap-to       4
+            :last-request 5}
+           (mailserver/calculate-gap
+            {:gap-from     1
+             :gap-to       4
+             :last-request 5}
+            {:request-from 2
+             :request-to   3}))))
+  (testing "calculate-gap#0"
+    (is (= {:gap-from     2
+            :gap-to       3
+            :last-request 3}
+           (mailserver/calculate-gap
+            {:gap-from     3
+             :gap-to       3
+             :last-request 3}
+            {:request-from 1
+             :request-to   2}))))
+  (testing "calculate-gap#7"
+    (is (= {:gap-from     3
+            :gap-to       4
+            :last-request 5}
+           (mailserver/calculate-gap
+            {:gap-from     3
+             :gap-to       4
+             :last-request 5}
+            {:request-from 1
+             :request-to   2}))))
+  (testing "calculate-gap#8"
+    (is (= {:gap-from     5
+            :gap-to       5
+            :last-request 5}
+           (mailserver/calculate-gap
+            {:gap-from     2
+             :gap-to       3
+             :last-request 5}
+            {:request-from 1
+             :request-to   4}))))
+  (testing "calculate-gap#8-1"
+    (is (= {:gap-from     3
+            :gap-to       3
+            :last-request 3}
+           (mailserver/calculate-gap
+            {:gap-from     1
+             :gap-to       2
+             :last-request 3}
+            {:request-from 1
+             :request-to   2}))))
+  (testing "calculate-gap#9"
+    (is (= {:gap-from     5
+            :gap-to       5
+            :last-request 5}
+           (mailserver/calculate-gap
+            {:gap-from     2
+             :gap-to       3
+             :last-request 4}
+            {:request-from 1
+             :request-to   5}))))
+  (testing "calculate-gap#9-1"
+    (is (= {:gap-from     3
+            :gap-to       3
+            :last-request 3}
+           (mailserver/calculate-gap
+            {:gap-from     1
+             :gap-to       2
+             :last-request 3}
+            {:request-from 1
+             :request-to   3}))))
+  (testing "calculate-gap#10"
+    (is (= {:gap-from     1
+            :gap-to       2
+            :last-request 5}
+           (mailserver/calculate-gap
+            {:gap-from     1
+             :gap-to       3
+             :last-request 4}
+            {:request-from 2
+             :request-to   5}))))
+  (testing "calculate-gap#10-1"
+    (is (= {:gap-from     1
+            :gap-to       2
+            :last-request 3}
+           (mailserver/calculate-gap
+            {:gap-from     1
+             :gap-to       2
+             :last-request 3}
+            {:request-from 2
+             :request-to   3})))))

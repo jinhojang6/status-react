@@ -37,10 +37,37 @@ class TransactionsButton(BaseButton):
             from views.send_transaction_view import SendTransactionView
             return SendTransactionView(self.driver)
 
+    class SignTypedMessageButton(BaseButton):
+        def __init__(self, driver):
+            super(TransactionsButton.SignTypedMessageButton, self).__init__(driver)
+            self.locator = self.Locator.text_selector('Sign Typed Message')
+
+        def navigate(self):
+            from views.send_transaction_view import SendTransactionView
+            return SendTransactionView(self.driver)
+
     class DeployContractButton(BaseButton):
         def __init__(self, driver):
             super(TransactionsButton.DeployContractButton, self).__init__(driver)
             self.locator = self.Locator.text_selector('Deploy simple contract')
+
+        def navigate(self):
+            from views.send_transaction_view import SendTransactionView
+            return SendTransactionView(self.driver)
+
+    class SendTwoTxOneByOneButton(BaseButton):
+        def __init__(self, driver):
+            super(TransactionsButton.SendTwoTxOneByOneButton, self).__init__(driver)
+            self.locator = self.Locator.text_selector('Send two Txs, one after another, 0.00001 and 0.00002 ETH')
+
+        def navigate(self):
+            from views.send_transaction_view import SendTransactionView
+            return SendTransactionView(self.driver)
+
+    class SendTwoTxInBatchButton(BaseButton):
+        def __init__(self, driver):
+            super(TransactionsButton.SendTwoTxInBatchButton, self).__init__(driver)
+            self.locator = self.Locator.text_selector('Send two Txs in batch, 0.00001 and 0.00002 ETH')
 
         def navigate(self):
             from views.send_transaction_view import SendTransactionView
@@ -88,7 +115,10 @@ class StatusTestDAppView(BaseWebView):
         self.sign_message_button = TransactionsButton.SignMessageButton(self.driver)
         self.deploy_contract_button = TransactionsButton.DeployContractButton(self.driver)
         self.send_one_tx_in_batch_button = SendOneTransactionInBatchButton(self.driver)
+        self.send_two_tx_one_by_one_button = TransactionsButton.SendTwoTxOneByOneButton(self.driver)
+        self.send_two_tx_in_batch_button = TransactionsButton.SendTwoTxInBatchButton(self.driver)
         self.test_filters_button = TransactionsButton.TestFiltersButton(self.driver)
+        self.sign_typed_message_button = TransactionsButton.SignTypedMessageButton(self.driver)
 
         self.status_api_button = StatusAPIButton(self.driver)
         self.request_contact_code_button = StatusAPIButton.RequestContactCodeButton(self.driver)

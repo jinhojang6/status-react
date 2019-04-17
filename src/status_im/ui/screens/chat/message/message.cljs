@@ -47,40 +47,38 @@
           (commands/generate-preview command (commands/add-chat-contacts contacts command-message))
           [react/text (str "Unhandled command: " (-> command-message :content :command-path first))])))))
 
-(defview message-timestamp [t justify-timestamp? outgoing command? content]
+(defview message-timestamp
+  [t justify-timestamp? outgoing command? content content-type]
   (when-not command?
-    [react/text {:style (style/message-timestamp-text justify-timestamp? outgoing (:rtl? content))} t]))
+    [react/text {:style (style/message-timestamp-text
+                         justify-timestamp?
+                         outgoing
+                         (:rtl? content)
+                         (= content-type constants/content-type-emoji))}
+     t]))
 
 (defn message-view
-  [{:keys [timestamp-str outgoing content] :as message} message-content {:keys [justify-timestamp?]}]
+  [{:keys [timestamp-str outgoing content content-type] :as message} message-content {:keys [justify-timestamp?]}]
   [react/view (style/message-view message)
    message-content
    [message-timestamp timestamp-str justify-timestamp? outgoing (or (get content :command-path)
                                                                     (get content :command-ref))
-    content]])
-
-(defn timestamp-with-padding
-  "We can't use CSS as nested Text element don't accept margins nor padding
-  so we pad the invisible placeholder with some spaces to avoid having too
-  close to the text"
-  [t]
-  (str "   " t))
+    content content-type]])
 
 (defview quoted-message [{:keys [from text]} outgoing current-public-key]
   (letsubs [username [:contacts/contact-name-by-identity from]]
     [react/view {:style (style/quoted-message-container outgoing)}
      [react/view {:style style/quoted-message-author-container}
-      [vector-icons/icon :main-icons/reply {:color (if outgoing colors/wild-blue-yonder colors/gray)}]
-      [react/text {:style (style/quoted-message-author outgoing)}
-       (chat.utils/format-reply-author from username current-public-key)]]
+      [vector-icons/icon :tiny-icons/tiny-reply {:color (if outgoing colors/wild-blue-yonder colors/gray)}]
+      (chat.utils/format-reply-author from username current-public-key (partial style/quoted-message-author outgoing))]
+
      [react/text {:style           (style/quoted-message-text outgoing)
                   :number-of-lines 5}
       text]]))
 
 (defview message-content-status [{:keys [content]}]
   [react/view style/status-container
-   [react/text {:style style/status-text
-                :font  :default}
+   [react/text {:style style/status-text}
     (:text content)]])
 
 (defn expand-button [expanded? chat-id message-id]
@@ -95,14 +93,17 @@
      [react/view
       (when (:response-to content)
         [quoted-message (:response-to content) outgoing current-public-key])
-      [react/text (cond-> {:style           (style/text-message collapsible? outgoing)}
-                    (and collapsible? (not expanded?))
-                    (assoc :number-of-lines constants/lines-collapse-threshold))
-       (if-let [render-recipe (:render-recipe content)]
-         (chat.utils/render-chunks render-recipe message)
-         (:text content))
-       [react/text {:style (style/message-timestamp-placeholder-text outgoing)}
-        (timestamp-with-padding timestamp-str)]]
+      (apply react/nested-text
+             (cond-> {:style (style/text-message collapsible? outgoing)
+                      :text-break-strategy :balanced}
+               (and collapsible? (not expanded?))
+               (assoc :number-of-lines constants/lines-collapse-threshold))
+             (conj (if-let [render-recipe (:render-recipe content)]
+                     (chat.utils/render-chunks render-recipe message)
+                     [(:text content)])
+                   [{:style (style/message-timestamp-placeholder outgoing)}
+                    (str "  " timestamp-str)]))
+
       (when collapsible?
         [expand-button expanded? chat-id message-id])])
    {:justify-timestamp? true}])
@@ -110,7 +111,8 @@
 (defn emoji-message
   [{:keys [content] :as message}]
   [message-view message
-   [react/text {:style (style/emoji-message message)} (:text content)]])
+   [react/text {:style (style/emoji-message message)}
+    (:text content)]])
 
 (defmulti message-content (fn [_ message _] (message :content-type)))
 
@@ -140,19 +142,18 @@
 (defmethod message-content constants/content-type-sticker
   [wrapper {:keys [content] :as message}]
   [wrapper message
-   [react/image {:style {:margin 10 :width 100 :height 100}
+   [react/image {:style {:margin 10 :width 140 :height 140}
                  :source {:uri (:uri content)}}]])
 
 (defmethod message-content :default
   [wrapper {:keys [content-type] :as message}]
   [wrapper message
    [message-view message
-    [react/text {} (str "Unhandled content-type " content-type)]]])
+    [react/text (str "Unhandled content-type " content-type)]]])
 
 (defn- text-status [status]
   [react/view style/delivery-view
-   [react/text {:style style/delivery-text
-                :font  :default}
+   [react/text {:style style/delivery-text}
     (i18n/message-status-label status)]])
 
 (defview group-message-delivery-status [{:keys [message-id current-public-key user-statuses] :as msg}]
@@ -179,8 +180,7 @@
                                    :height        16
                                    :border-radius 8}}])
           (if (> delivery-statuses-count 3)
-            [react/text {:style style/delivery-text
-                         :font  :default}
+            [react/text {:style style/delivery-text}
              (str "+ " (- delivery-statuses-count 3))])]]))))
 
 (defn message-activity-indicator []
@@ -241,8 +241,7 @@
 
 (defview message-author-name [from message-username]
   (letsubs [username [:contacts/contact-name-by-identity from]]
-    [react/text {:style style/message-author-name}
-     (chat.utils/format-author from (or username message-username))]))
+    (chat.utils/format-author from (or username message-username) style/message-author-name)))
 
 (defn message-body
   [{:keys [last-in-group?
@@ -264,7 +263,7 @@
     [react/view (style/group-message-view outgoing message-type)
      (when display-username?
        [message-author-name from username])
-     [react/view {:style (style/timestamp-content-wrapper message)}
+     [react/view {:style (style/timestamp-content-wrapper outgoing message-type)}
       content]]]
    [react/view (style/delivery-status outgoing)
     [message-delivery-status message]]])
@@ -272,9 +271,12 @@
 (defn chat-message [{:keys [message-id old-message-id outgoing group-chat modal? current-public-key content-type content] :as message}]
   [react/view
    [react/touchable-highlight {:on-press      (fn [_]
-                                                (re-frame/dispatch [:chat.ui/set-chat-ui-props {:messages-focused? true}])
+                                                (when (= content-type constants/content-type-sticker)
+                                                  (re-frame/dispatch [:stickers/open-sticker-pack (:pack content)]))
+                                                (re-frame/dispatch [:chat.ui/set-chat-ui-props {:messages-focused? true
+                                                                                                :show-stickers? false}])
                                                 (react/dismiss-keyboard!))
-                               :on-long-press #(when (= content-type constants/content-type-text)
+                               :on-long-press #(when (or (= content-type constants/content-type-text) (= content-type constants/content-type-emoji))
                                                  (list-selection/chat-message message-id old-message-id (:text content) (i18n/label :t/message)))}
     [react/view {:accessibility-label :chat-item}
      (let [incoming-group (and group-chat (not outgoing))]

@@ -24,6 +24,11 @@
 
 (def utils dependencies/web3-utils)
 
+(def snt-contracts
+  {:mainnet "0x744d70fdbe2ba4cf95131626614a1763df805b9e"
+   :testnet "0xc55cF4B03948D7EBc8b9E8BAD92643703811d162"
+   :rinkeby nil})
+
 (def abi
   (clj->js
    [{:constant        true
@@ -122,16 +127,23 @@
                            on-completed))
 
 (defn transfer-from [web3 contract from-address to-address value cb]
-  (ethereum/call web3
-                 (ethereum/call-params contract "transferFrom(address,address,uint256)" (ethereum/normalized-address from-address) (ethereum/normalized-address to-address) (ethereum/int->hex value))
-                 #(cb %1 (ethereum/hex->boolean %2))))
+  (ethereum/call (ethereum/call-params contract
+                                       "transferFrom(address,address,uint256)"
+                                       (ethereum/normalized-address from-address)
+                                       (ethereum/normalized-address to-address)
+                                       (ethereum/int->hex value))
+                 #(cb (ethereum/hex->boolean %))))
 
 (defn approve [web3 contract address value cb]
-  (ethereum/call web3
-                 (ethereum/call-params contract "approve(address,uint256)" (ethereum/normalized-address address)  (ethereum/int->hex value))
-                 #(cb %1 (ethereum/hex->boolean %2))))
+  (ethereum/call (ethereum/call-params contract
+                                       "approve(address,uint256)"
+                                       (ethereum/normalized-address address)
+                                       (ethereum/int->hex value))
+                 #(cb (ethereum/hex->boolean %))))
 
 (defn allowance [web3 contract owner-address spender-address cb]
-  (ethereum/call web3
-                 (ethereum/call-params contract "allowance(address,address)" (ethereum/normalized-address owner-address) (ethereum/normalized-address spender-address))
-                 #(cb %1 (ethereum/hex->bignumber %2))))
+  (ethereum/call (ethereum/call-params contract
+                                       "allowance(address,address)"
+                                       (ethereum/normalized-address owner-address)
+                                       (ethereum/normalized-address spender-address))
+                 #(cb (ethereum/hex->bignumber %))))

@@ -1,6 +1,8 @@
 (ns status-im.ui.screens.home.styles
   (:require-macros [status-im.utils.styles :refer [defstyle defnstyle]])
-  (:require [status-im.ui.components.colors :as colors]))
+  (:require [status-im.ui.components.colors :as colors]
+            [status-im.utils.platform :as platform]
+            [status-im.ui.components.bottom-bar.styles :as tabs.styles]))
 
 (defn toolbar []
   {:background-color colors/white})
@@ -12,7 +14,6 @@
 
 (defstyle chat-container
   {:flex-direction   :row
-   :background-color colors/white
    :android          {:height 76}
    :ios              {:height 74}
    :overflow         :hidden})
@@ -75,24 +76,52 @@
              :height    26}})
 
 (defstyle private-group-icon-container
-  {:width        20
-   :height       12
-   :margin-right 6})
+  {:align-items     :center
+   :justify-content :center
+   :margin-right    6})
 
 (defstyle public-group-icon-container
-  {:width        20
-   :height       12
-   :margin-right 6})
+  {:align-items     :center
+   :justify-content :center
+   :margin-right    6})
 
 (def last-message-container
   {:flex-shrink 1})
 
-(defstyle last-message-text
-  {:color   colors/text-gray
-   :android {:font-size 14
-             :height    24}
-   :ios     {:font-size 15
-             :height    24}})
+(def last-message-text
+  {:color  colors/text-gray
+   :height 24})
+
+(def search-input-height 56)
+
+(def search-container
+  {:height             search-input-height
+   :flex-direction     :row
+   :padding-horizontal 16
+   :background-color   colors/white
+   :align-items        :center
+   :justify-content    :center})
+
+(def search-input-container
+  {:background-color colors/gray-lighter
+   :flex             1
+   :flex-direction   :row
+   :height           36
+   :align-items      :center
+   :justify-content  :center
+   :border-radius    8})
+
+(def search-input
+  (merge {:flex 1}
+         (when platform/android?
+           {:margin      0
+            :padding     0})))
+
+(def filter-section-title
+  {:margin-left   16
+   :margin-top    14
+   :margin-bottom 4
+   :color         colors/gray})
 
 (def status-container
   {:flex-direction :row
@@ -119,9 +148,6 @@
    :android    {:top 2}
    :ios        {:top 3}})
 
-(def container
-  {:flex 1})
-
 (def group-icon
   {:margin-top   8
    :margin-right 6
@@ -136,57 +162,44 @@
    :margin-horizontal 34})
 
 (def no-chats-text
-  {:line-height    21
-   :text-align     :center
+  {:text-align     :center
    :color          colors/gray})
 
 (def welcome-view
   {:flex 1})
 
-(defstyle welcome-image-container
+(def welcome-image-container
   {:align-items :center
-   :android     {:margin-top 38}
-   :ios         {:margin-top 42}})
+   :margin-top  42})
 
-(def welcome-image
-  {:width  320
-   :height 278})
+(def welcome-text
+  {:typography  :header
+   :margin-top  32
+   :text-align  :center})
 
-(defstyle welcome-text
-  {:line-height    28
-   :font-size      22
-   :font-weight    :bold
-   :letter-spacing -0.3
-   :android        {:margin-top 22}
-   :ios            {:margin-top 96}
-   :text-align     :center
-   :color          colors/black})
-
-(defstyle welcome-text-description
-  {:line-height    21
-   :margin-top     8
-   :android        {:margin-bottom 82}
-   :ios            {:margin-bottom 32}
-   :text-align     :center
-   :color          colors/gray})
-
-(def toolbar-logo
-  {:size      42
-   :icon-size 17
-   :shadow?   false})
+(def welcome-text-description
+  {:margin-top        8
+   :text-align        :center
+   :margin-horizontal 32
+   :color             colors/gray})
 
 (def action-button-container
-  {:position :absolute
-   :bottom   16
-   :right    16})
+  {:position    :absolute
+   :align-items :center
+   :bottom      (+ tabs.styles/tabs-diff 6)
+   :right       0
+   :left        0})
 
 (def action-button
-  {:width            56
-   :height           56
+  {:margin           10
+   :width            40
+   :height           40
    :background-color colors/blue
-   :border-radius    28
+   :border-radius    20
    :align-items      :center
-   :justify-content  :center})
-
-(def spinner-container
-  {:margin-right 10})
+   :justify-content  :center
+   :shadow-offset    {:width 0 :height 1}
+   :shadow-radius    6
+   :shadow-opacity   1
+   :shadow-color     "rgba(0, 12, 63, 0.2)"
+   :elevation        2})

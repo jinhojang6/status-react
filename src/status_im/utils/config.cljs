@@ -17,7 +17,6 @@
 
 (def bootnodes-settings-enabled? (enabled? (get-config :BOOTNODES_SETTINGS_ENABLED "1")))
 (def rpc-networks-only? (enabled? (get-config :RPC_NETWORKS_ONLY "1")))
-(def group-chats-publish-to-topic? (enabled? (get-config :GROUP_CHATS_PUBLISH_TO_TOPIC "0")))
 (def show-contact-recovery-pop-up? (enabled? (get-config :SHOW_CONTACT_RECOVERY_POPUP)))
 (def mailserver-confirmations-enabled? (enabled? (get-config :MAILSERVER_CONFIRMATIONS_ENABLED)))
 (def mainnet-warning-enabled? (enabled? (get-config :MAINNET_WARNING_ENABLED 0)))
@@ -32,6 +31,9 @@
 (def dev-build? (enabled? (get-config :DEV_BUILD 0)))
 (def erc20-contract-warnings-enabled? (enabled? (get-config :ERC20_CONTRACT_WARNINGS)))
 (def partitioned-topic-enabled? (enabled? (get-config :PARTITIONED_TOPIC "0")))
+(def tr-to-talk-enabled? (enabled? (get-config :TRIBUTE_TO_TALK 0)))
+(def max-message-delivery-attempts (js/parseInt (get-config :MAX_MESSAGE_DELIVERY_ATTEMPTS "6")))
+(def contract-nodes-enabled? (enabled? (get-config :CONTRACT_NODES "0")))
 
 ;; CONFIG VALUES
 (def log-level
@@ -46,3 +48,4 @@
 (def pow-target (js/parseFloat (get-config :POW_TARGET "0.002")))
 (def pow-time (js/parseInt (get-config :POW_TIME "1")))
 (def use-sym-key (enabled? (get-config :USE_SYM_KEY 0)))
+(def max-installations 2)

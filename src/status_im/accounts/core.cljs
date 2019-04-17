@@ -3,19 +3,25 @@
             [status-im.accounts.update.core :as accounts.update]
             [status-im.i18n :as i18n]
             [status-im.ui.screens.navigation :as navigation]
+            [status-im.native-module.core :as native-module]
             [status-im.ui.screens.wallet.settings.models :as wallet.settings.models]
             [status-im.utils.config :as config]
             [status-im.utils.utils :as utils]
             [status-im.utils.fx :as fx]
-            [status-im.utils.platform :as platform]))
+            [status-im.utils.platform :as platform]
+            [status-im.utils.build :as build]))
+
+(re-frame/reg-fx
+ ::chaos-mode-changed
+ (fn [on]
+   (native-module/chaos-mode-update on (constantly nil))))
 
 (fx/defn show-mainnet-is-default-alert [{:keys [db]}]
-  (let [enter-name-screen? (= :enter-name (get-in db [:accounts/create :step]))
-        shown? (get-in db [:account/account :mainnet-warning-shown?])]
+  (let [shown-version (get-in db [:account/account :mainnet-warning-shown-version])
+        current-version build/version]
     (when (and platform/mobile?
                config/mainnet-warning-enabled?
-               (not shown?)
-               (not enter-name-screen?))
+               (not= shown-version current-version))
       (utils/show-popup
        (i18n/label :mainnet-is-default-alert-title)
        (i18n/label :mainnet-is-default-alert-text)
@@ -61,6 +67,15 @@
             (update-extensions-state dev-mode?)
             (accounts.update/account-update {:dev-mode? dev-mode?}
                                             {})))
+
+(fx/defn switch-chaos-mode [{:keys [db] :as cofx} chaos-mode?]
+  (when (:account/account db)
+    (let [settings (get-in db [:account/account :settings])]
+      (fx/merge cofx
+                {::chaos-mode-changed chaos-mode?}
+                (accounts.update/update-settings
+                 (assoc settings :chaos-mode? chaos-mode?)
+                 {})))))
 
 (fx/defn enable-notifications [cofx desktop-notifications?]
   (accounts.update/account-update cofx

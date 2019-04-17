@@ -17,7 +17,6 @@
             [status-im.chat.models.message :as chat.message]
             [status-im.contact.core :as contact]
             [status-im.contact-recovery.core :as contact-recovery]
-            [status-im.data-store.core :as data-store]
             [status-im.extensions.core :as extensions]
             [status-im.extensions.registry :as extensions.registry]
             [status-im.fleet.core :as fleet]
@@ -31,14 +30,16 @@
             [status-im.network.core :as network]
             [status-im.notifications.core :as notifications]
             [status-im.pairing.core :as pairing]
+            [status-im.contact-code.core :as contact-code]
             [status-im.privacy-policy.core :as privacy-policy]
             [status-im.protocol.core :as protocol]
             [status-im.qr-scanner.core :as qr-scanner]
             [status-im.search.core :as search]
             [status-im.signals.core :as signals]
             [status-im.transport.message.core :as transport.message]
+            [status-im.transport.core :as transport]
             [status-im.ui.screens.currency-settings.models :as currency-settings.models]
-            [status-im.chat.models.message :as models.message]
+            [status-im.tribute-to-talk.core :as tribute-to-talk]
             [status-im.node.core :as node]
             [status-im.web3.core :as web3]
             [status-im.ui.screens.navigation :as navigation]
@@ -46,13 +47,15 @@
             [status-im.utils.handlers :as handlers]
             [status-im.utils.utils :as utils]
             [taoensso.timbre :as log]
-            [status-im.utils.datetime :as time]
             [status-im.chat.commands.core :as commands]
             [status-im.chat.models.loading :as chat-loading]
             [status-im.node.core :as node]
-            [cljs.reader :as edn]
             [status-im.stickers.core :as stickers]
-            [status-im.utils.config :as config]))
+            [status-im.utils.config :as config]
+            [status-im.ui.components.bottom-sheet.core :as bottom-sheet]
+            [status-im.ui.components.react :as react]
+            [status-im.utils.build :as build]
+            [status-im.chat.db :as chat.db]))
 
 ;; init module
 
@@ -109,10 +112,12 @@
              (chat-loading/initialize-chats {:from 10}))))
 
 (defn account-change-success
-  [{:keys [db] :as cofx} [_ address]]
-  (let [{:node/keys [status on-ready]} db]
+  [{:keys [db] :as cofx} [_ address nodes]]
+  (let [{:node/keys [status]} db]
     (fx/merge
      cofx
+     (when nodes
+       (fleet/set-nodes :eth.contract nodes))
      (if (= status :started)
        (accounts.login/login)
        (node/initialize (get-in db [:accounts/login :address])))
@@ -152,12 +157,44 @@
 (handlers/register-handler-fx
  :accounts.ui/mainnet-warning-shown
  (fn [cofx _]
-   (accounts.update/account-update cofx {:mainnet-warning-shown? true} {})))
+   (accounts.update/account-update cofx {:mainnet-warning-shown-version build/version} {})))
+
+(handlers/register-handler-fx
+ :accounts.update.callback/published
+ (fn [{:keys [now] :as cofx} _]
+   (accounts.update/account-update cofx {:last-updated now} {})))
+
+(handlers/register-handler-fx
+ :accounts.update.callback/failed-to-publish
+ (fn [{:keys [now] :as cofx} [_ message]]
+   (log/warn "failed to publish account update" message)
+   (accounts.update/account-update cofx {:last-updated now} {})))
 
 (handlers/register-handler-fx
  :accounts.ui/dev-mode-switched
  (fn [cofx [_ dev-mode?]]
    (accounts/switch-dev-mode cofx dev-mode?)))
+
+(def CUD-url "https://chaos-unicorn-day.org")
+
+(defn open-chaos-unicorn-day-link []
+  (.openURL react/linking CUD-url))
+
+(handlers/register-handler-fx
+ :accounts.ui/chaos-mode-switched
+ (fn [{:keys [db] :as cofx} [_ chaos-mode?]]
+   (let [old-chaos-mode? (get-in db [:account/account :settings :chaos-mode?])]
+     (fx/merge
+      cofx
+      (when (and chaos-mode?
+                 (not= old-chaos-mode? chaos-mode?))
+        {:ui/show-confirmation
+         {:title               (i18n/label :t/chaos-unicorn-day)
+          :content             (i18n/label :t/chaos-unicorn-day-details)
+          :confirm-button-text (i18n/label :t/see-details)
+          :cancel-button-text  (i18n/label :t/cancel)
+          :on-accept           open-chaos-unicorn-day-link}})
+      (accounts/switch-chaos-mode chaos-mode?)))))
 
 (handlers/register-handler-fx
  :accounts.ui/notifications-enabled
@@ -203,7 +240,8 @@
   (re-frame/inject-cofx :accounts.create/get-signing-phrase)
   (re-frame/inject-cofx :accounts.create/get-status)]
  (fn [cofx [_ result password]]
-   (accounts.create/on-account-created cofx result password {:seed-backed-up? false})))
+   (accounts.create/on-account-created cofx result password {:seed-backed-up? false
+                                                             :new-account?    true})))
 
 (handlers/register-handler-fx
  :accounts.create.ui/create-new-account-button-pressed
@@ -215,7 +253,7 @@
 (handlers/register-handler-fx
  :accounts.recover.ui/recover-account-button-pressed
  (fn [cofx _]
-   (accounts.recover/navigate-to-recover-account-screen cofx)))
+   (hardwallet/navigate-to-recover-method cofx)))
 
 (handlers/register-handler-fx
  :accounts.recover.ui/passphrase-input-changed
@@ -362,8 +400,13 @@
    (mailserver/set-url-from-qr cofx url)))
 
 (handlers/register-handler-fx
+ :mailserver.callback/resend-request
+ (fn [cofx [_ request]]
+   (mailserver/resend-request cofx request)))
+
+(handlers/register-handler-fx
  :mailserver.ui/connect-pressed
- (fn [cofx [_  mailserver-id]]
+ (fn [cofx [_ mailserver-id]]
    (mailserver/show-connection-confirmation cofx mailserver-id)))
 
 (handlers/register-handler-fx
@@ -375,6 +418,16 @@
  :mailserver.ui/reconnect-mailserver-pressed
  (fn [cofx _]
    (mailserver/connect-to-mailserver cofx)))
+
+(handlers/register-handler-fx
+ :mailserver.ui/unpin-pressed
+ (fn [cofx _]
+   (mailserver/unpin cofx)))
+
+(handlers/register-handler-fx
+ :mailserver.ui/pin-pressed
+ (fn [cofx _]
+   (mailserver/pin cofx)))
 
 (handlers/register-handler-fx
  :mailserver.ui/request-error-pressed
@@ -392,6 +445,11 @@
    (mailserver/check-connection cofx)))
 
 (handlers/register-handler-fx
+ :mailserver/fetch-history
+ (fn [cofx [_ chat-id from-timestamp]]
+   (mailserver/fetch-history cofx chat-id {:from from-timestamp})))
+
+(handlers/register-handler-fx
  :mailserver.callback/generate-mailserver-symkey-success
  (fn [cofx [_ mailserver sym-key-id]]
    (mailserver/add-mailserver-sym-key cofx mailserver sym-key-id)))
@@ -406,6 +464,16 @@
  (fn [cofx [_ error]]
    (log/error "Error on mark-trusted-peer: " error)
    (mailserver/check-connection cofx)))
+
+(handlers/register-handler-fx
+ :mailserver.callback/request-error
+ (fn [cofx [_ error]]
+   (mailserver/handle-request-error cofx error)))
+
+(handlers/register-handler-fx
+ :mailserver.callback/request-success
+ (fn [cofx [_ request-id]]
+   (mailserver/handle-request-success cofx request-id)))
 
 ;; network module
 
@@ -436,9 +504,14 @@
    (network/save-non-rpc-network cofx network)))
 
 (handlers/register-handler-fx
+ :network.ui/save-rpc-network-pressed
+ (fn [cofx [_ network]]
+   (network/save-rpc-network cofx network)))
+
+(handlers/register-handler-fx
  :network.ui/remove-network-confirmed
  (fn [cofx [_ network]]
-   (network/remove-network cofx network)))
+   (network/remove-network cofx network [:navigate-back])))
 
 (handlers/register-handler-fx
  :network.ui/connect-network-pressed
@@ -509,8 +582,8 @@
 
 (handlers/register-handler-fx
  :bootnodes.ui/delete-pressed
- (fn [_ [_ id]]
-   (bootnodes/show-delete-bootnode-confirmation _ id)))
+ (fn [cofx [_ id]]
+   (bootnodes/show-delete-bootnode-confirmation cofx id)))
 
 (handlers/register-handler-fx
  :bootnodes.ui/delete-confirmed
@@ -552,7 +625,7 @@
 (handlers/register-handler-fx
  :extensions.ui/install-extension-button-pressed
  (fn [cofx [_ url]]
-   (extensions.registry/load cofx url true)))
+   (extensions.registry/install-from-message cofx url true)))
 
 (handlers/register-handler-fx
  :extensions.ui/install-button-pressed
@@ -610,6 +683,11 @@
    (qr-scanner/scan-qr-code cofx identifier (merge {:handler handler} opts))))
 
 (handlers/register-handler-fx
+ :qr-scanner.ui/qr-code-error-dismissed
+ (fn [cofx [_ _]]
+   (qr-scanner/scan-qr-code-after-error-dismiss cofx)))
+
+(handlers/register-handler-fx
  :qr-scanner.callback/scan-qr-code-success
  (fn [cofx [_ context data]]
    (qr-scanner/set-qr-code cofx context data)))
@@ -645,8 +723,22 @@
 
 (handlers/register-handler-fx
  :chat.ui/fetch-history-pressed
- (fn [cofx [_ chat-id]]
-   (mailserver/fetch-history cofx chat-id)))
+ (fn [{:keys [now] :as cofx} [_ chat-id]]
+   (mailserver/fetch-history cofx chat-id
+                             {:from (- (quot now 1000) (* 24 3600))})))
+
+(handlers/register-handler-fx
+ :chat.ui/fill-the-gap
+ (fn [{:keys [db] :as cofx}]
+   (let [mailserver-topics (:mailserver/topics db)
+         chat-id           (:current-chat-id db)
+         topic             (chat.db/topic-by-current-chat db)
+         gap               (chat.db/messages-gap mailserver-topics topic)]
+     (mailserver/fill-the-gap
+      cofx
+      (assoc gap
+             :topic topic
+             :chat-id chat-id)))))
 
 (handlers/register-handler-fx
  :chat.ui/remove-chat-pressed
@@ -660,6 +752,11 @@
  :chat.ui/set-chat-ui-props
  (fn [{:keys [db]} [_ kvs]]
    {:db (chat/set-chat-ui-props db kvs)}))
+
+(handlers/register-handler-fx
+ :chat.ui/join-time-messages-checked
+ (fn [{:keys [db]} [_ chat-id]]
+   {:db (chat/join-time-messages-checked db chat-id)}))
 
 (handlers/register-handler-fx
  :chat.ui/show-message-details
@@ -763,9 +860,9 @@
 (handlers/register-handler-fx
  :chat.ui/set-command-parameter
  (fn [{{:keys [chats current-chat-id chat-ui-props id->command access-scope->command-id]} :db :as cofx} [_ value]]
-   (let [current-chat (get chats current-chat-id)
-         selection (get-in chat-ui-props [current-chat-id :selection])
-         commands (commands/chat-commands id->command access-scope->command-id current-chat)
+   (let [current-chat   (get chats current-chat-id)
+         selection      (get-in chat-ui-props [current-chat-id :selection])
+         commands       (commands/chat-commands id->command access-scope->command-id current-chat)
          {:keys [current-param-position params]} (commands.input/selected-chat-command
                                                   (:input-text current-chat) selection commands)
          last-param-idx (dec (count params))]
@@ -781,11 +878,11 @@
 
 (handlers/register-handler-fx
  :chat/send-sticker
- (fn [{{:keys [current-chat-id] :account/keys [account]} :db :as cofx} [_ {:keys [uri]}]]
+ (fn [{{:keys [current-chat-id] :account/keys [account]} :db :as cofx} [_ {:keys [uri] :as sticker}]]
    (fx/merge
     cofx
     (accounts/update-recent-stickers (conj (remove #(= uri %) (:recent-stickers account)) uri))
-    (chat.input/send-sticker-fx uri current-chat-id))))
+    (chat.input/send-sticker-fx sticker current-chat-id))))
 
 (handlers/register-handler-fx
  :chat/disable-cooldown
@@ -874,20 +971,14 @@
 ;; hardwallet module
 
 (handlers/register-handler-fx
- :hardwallet.ui/get-application-info
- (fn [{:keys [db]} _]
-   {:hardwallet/get-application-info (get-in db [:hardwallet :secrets :pairing])}))
-
-(handlers/register-handler-fx
- :hardwallet.callback/on-retrieve-pairing-success
- (fn [{:keys [db]} [_ pairing-data]]
-   {:db (update-in db [:hardwallet :secrets] merge (select-keys pairing-data
-                                                                [:pairing :paired-on]))}))
-
-(handlers/register-handler-fx
  :hardwallet.callback/on-register-card-events
  (fn [cofx [_ listeners]]
    (hardwallet/on-register-card-events cofx listeners)))
+
+(handlers/register-handler-fx
+ :hardwallet/get-application-info
+ (fn [cofx _]
+   (hardwallet/get-application-info cofx nil nil)))
 
 (handlers/register-handler-fx
  :hardwallet.callback/on-get-application-info-success
@@ -918,6 +1009,16 @@
  :hardwallet.callback/on-card-disconnected
  (fn [cofx [_ data]]
    (hardwallet/on-card-disconnected cofx data)))
+
+(handlers/register-handler-fx
+ :hardwallet.callback/on-init-card-success
+ (fn [cofx [_ secrets]]
+   (hardwallet/on-init-card-success cofx secrets)))
+
+(handlers/register-handler-fx
+ :hardwallet.callback/on-init-card-error
+ (fn [cofx [_ error]]
+   (hardwallet/on-init-card-error cofx error)))
 
 (handlers/register-handler-fx
  :hardwallet.callback/on-install-applet-and-init-card-success
@@ -1018,6 +1119,11 @@
    (hardwallet/on-get-keys-success cofx data)))
 
 (handlers/register-handler-fx
+ :hardwallet.callback/on-sign-success
+ (fn [cofx [_ data]]
+   (hardwallet/on-sign-success cofx data)))
+
+(handlers/register-handler-fx
  :hardwallet/auto-login
  (fn [cofx _]
    (hardwallet/login-with-keycard cofx true)))
@@ -1028,9 +1134,19 @@
    (hardwallet/login-with-keycard cofx false)))
 
 (handlers/register-handler-fx
+ :hardwallet/check-card-state
+ (fn [cofx _]
+   (hardwallet/check-card-state cofx)))
+
+(handlers/register-handler-fx
  :hardwallet.callback/on-get-keys-error
  (fn [cofx [_ error]]
    (hardwallet/on-get-keys-error cofx error)))
+
+(handlers/register-handler-fx
+ :hardwallet.callback/on-sign-error
+ (fn [cofx [_ error]]
+   (hardwallet/on-sign-error cofx error)))
 
 (handlers/register-handler-fx
  :hardwallet.ui/status-hardwallet-option-pressed
@@ -1040,7 +1156,7 @@
 (handlers/register-handler-fx
  :hardwallet.ui/password-option-pressed
  (fn [cofx _]
-   (accounts.create/navigate-to-create-account-screen cofx)))
+   (hardwallet/password-option-pressed cofx)))
 
 (handlers/register-handler-fx
  :hardwallet.ui/go-to-settings-button-pressed
@@ -1048,31 +1164,14 @@
    {:hardwallet/open-nfc-settings nil}))
 
 (handlers/register-handler-fx
- :hardwallet.ui/hold-card-button-pressed
- (fn [{:keys [db] :as cofx} _]
-   (fx/merge cofx
-             {:db (assoc-in db [:hardwallet :setup-step] :begin)}
-             (navigation/navigate-to-cofx :hardwallet-setup nil))))
-
-(handlers/register-handler-fx
  :hardwallet.ui/begin-setup-button-pressed
- (fn [_ _]
-   {:ui/show-confirmation {:title               ""
-                           :content             (i18n/label :t/begin-keycard-setup-confirmation-text)
-                           :confirm-button-text (i18n/label :t/yes)
-                           :cancel-button-text  (i18n/label :t/no)
-                           :on-accept           #(re-frame/dispatch [:hardwallet.ui/begin-setup-confirm-button-pressed])
-                           :on-cancel           #()}}))
+ (fn [cofx _]
+   (hardwallet/begin-setup-button-pressed cofx)))
 
 (handlers/register-handler-fx
- :hardwallet.ui/begin-setup-confirm-button-pressed
+ :hardwallet/start-installation
  (fn [cofx _]
-   (hardwallet/load-preparing-screen cofx)))
-
-(handlers/register-handler-fx
- :hardwallet/install-applet-and-init-card
- (fn [cofx _]
-   (hardwallet/install-applet-and-init-card cofx)))
+   (hardwallet/start-installation cofx)))
 
 (handlers/register-handler-fx
  :hardwallet.ui/pair-card-button-pressed
@@ -1082,16 +1181,17 @@
 (handlers/register-handler-fx
  :hardwallet.ui/pair-code-input-changed
  (fn [{:keys [db]} [_ pair-code]]
-   {:db (assoc-in db [:hardwallet :pair-code] pair-code)}))
+   {:db (assoc-in db [:hardwallet :secrets :password] pair-code)}))
 
 (handlers/register-handler-fx
  :hardwallet.ui/pair-code-next-button-pressed
- (fn [{:keys [db]} _]))
+ (fn [cofx]
+   (hardwallet/pair cofx)))
 
 (handlers/register-handler-fx
  :hardwallet.ui/recovery-phrase-next-button-pressed
  (fn [cofx _]
-   (hardwallet/recovery-phrase-start-confirmation cofx)))
+   (hardwallet/recovery-phrase-next-button-pressed cofx)))
 
 (handlers/register-handler-fx
  :hardwallet.ui/recovery-phrase-confirm-word-next-button-pressed
@@ -1114,9 +1214,19 @@
    (hardwallet/load-loading-keys-screen cofx)))
 
 (handlers/register-handler-fx
+ :hardwallet/load-loading-keys-screen
+ (fn [cofx _]
+   (hardwallet/load-loading-keys-screen cofx)))
+
+(handlers/register-handler-fx
  :hardwallet.ui/recovery-phrase-cancel-pressed
  (fn [{:keys [db]} _]
    {:db (assoc-in db [:hardwallet :setup-step] :recovery-phrase)}))
+
+(handlers/register-handler-fx
+ :hardwallet/load-preparing-screen
+ (fn [cofx _]
+   (hardwallet/load-preparing-screen cofx)))
 
 (handlers/register-handler-fx
  :hardwallet/connection-error
@@ -1148,6 +1258,16 @@
    (hardwallet/load-pairing-screen cofx)))
 
 (handlers/register-handler-fx
+ :hardwallet/load-pairing-screen
+ (fn [cofx _]
+   (hardwallet/load-pairing-screen cofx)))
+
+(handlers/register-handler-fx
+ :hardwallet/load-generating-mnemonic-screen
+ (fn [cofx _]
+   (hardwallet/load-generating-mnemonic-screen cofx)))
+
+(handlers/register-handler-fx
  :hardwallet/pair
  (fn [cofx _]
    (hardwallet/pair cofx)))
@@ -1163,6 +1283,11 @@
    (hardwallet/update-pin cofx number step)))
 
 (handlers/register-handler-fx
+ :hardwallet.ui/navigate-back-button-clicked
+ (fn [cofx _]
+   (hardwallet/navigate-back-button-clicked cofx)))
+
+(handlers/register-handler-fx
  :hardwallet/process-pin-input
  (fn [cofx _]
    (hardwallet/process-pin-input cofx)))
@@ -1176,7 +1301,7 @@
 (handlers/register-handler-fx
  :hardwallet.ui/card-ready-next-button-pressed
  (fn [cofx _]
-   (hardwallet/load-generating-mnemonic-screen cofx)))
+   (hardwallet/card-ready-next-button-pressed cofx)))
 
 (handlers/register-handler-fx
  :hardwallet/generate-mnemonic
@@ -1254,6 +1379,11 @@
  :hardwallet/navigate-to-reset-card-screen
  (fn [cofx _]
    (hardwallet/navigate-to-reset-card-screen cofx)))
+
+(handlers/register-handler-fx
+ :hardwallet/sign
+ (fn [cofx _]
+   (hardwallet/sign cofx)))
 
 ;; browser module
 
@@ -1446,8 +1576,8 @@
 
 (handlers/register-handler-fx
  :group-chats.callback/extract-signature-success
- (fn [cofx [_ group-update raw-payload sender-signature]]
-   (group-chats/handle-membership-update cofx group-update raw-payload sender-signature)))
+ (fn [cofx [_ group-update message-info sender-signature]]
+   (group-chats/handle-membership-update cofx group-update message-info sender-signature)))
 
 ;; profile module
 
@@ -1512,11 +1642,6 @@
    (contact/unblock-contact cofx public-key)))
 
 (handlers/register-handler-fx
- :contact.ui/close-contact-pressed
- (fn [cofx [_ public-key]]
-   (contact/hide-contact cofx public-key)))
-
-(handlers/register-handler-fx
  :contact/qr-code-scanned
  [(re-frame/inject-cofx :random-id-generator)]
  (fn [cofx [_ _ contact-identity]]
@@ -1525,7 +1650,7 @@
 (handlers/register-handler-fx
  :contact/filters-added
  (fn [cofx [_ contact-identity]]
-   (contact/add-contact-and-open-chat cofx contact-identity)))
+   (contact/open-chat cofx contact-identity)))
 
 (handlers/register-handler-fx
  :contact.ui/start-group-chat-pressed
@@ -1536,23 +1661,13 @@
  :contact.ui/send-message-pressed
  [(re-frame/inject-cofx :random-id-generator)]
  (fn [cofx [_ {:keys [public-key]}]]
-   (contact/add-contact-and-open-chat cofx public-key)))
+   (contact/open-chat cofx public-key)))
 
 (handlers/register-handler-fx
  :contact.ui/contact-code-submitted
  [(re-frame/inject-cofx :random-id-generator)]
  (fn [cofx _]
    (contact/add-new-identity-to-contacts cofx)))
-
-(handlers/register-handler-fx
- :contact.ui/add-tag
- (fn [cofx _]
-   (contact/add-tag cofx)))
-
-(handlers/register-handler-fx
- :contact.ui/set-tag-input-field
- (fn [cofx [_ text]]
-   {:db (assoc-in (:db cofx) [:ui/contact :contact/new-tag] text)}))
 
 ;; search module
 
@@ -1584,6 +1699,16 @@
    {:db (assoc (:db cofx) :initial-props initial-props)}))
 
 (handlers/register-handler-fx
+ :contact-code.callback/contact-code-published
+ (fn [cofx arg]
+   (contact-code/published cofx)))
+
+(handlers/register-handler-fx
+ :contact-code.callback/contact-code-publishing-failed
+ (fn [cofx _]
+   (contact-code/publishing-failed cofx)))
+
+(handlers/register-handler-fx
  :pairing.ui/enable-installation-pressed
  (fn [cofx [_ installation-id]]
    (pairing/enable-fx cofx installation-id)))
@@ -1606,12 +1731,16 @@
 (handlers/register-handler-fx
  :pairing.callback/enable-installation-success
  (fn [cofx [_ installation-id]]
-   (pairing/enable cofx installation-id)))
+   (fx/merge cofx
+             (pairing/enable installation-id)
+             (accounts.update/send-account-update))))
 
 (handlers/register-handler-fx
  :pairing.callback/disable-installation-success
  (fn [cofx [_ installation-id]]
-   (pairing/disable cofx installation-id)))
+   (fx/merge cofx
+             (pairing/disable installation-id)
+             (accounts.update/send-account-update))))
 
 ;; Contact recovery module
 
@@ -1634,9 +1763,8 @@
 
 (handlers/register-handler-fx
  :stickers/load-sticker-pack-success
- (fn [{:keys [db]} [_ edn-string]]
-   (let [{{:keys [id] :as pack} 'meta} (edn/read-string edn-string)]
-     {:db (-> db (assoc-in [:stickers/packs id] (assoc pack :edn edn-string)))})))
+ (fn [cofx [_ edn-string id price open?]]
+   (stickers/load-sticker-pack-success cofx edn-string id price open?)))
 
 (handlers/register-handler-fx
  :stickers/install-pack
@@ -1645,16 +1773,103 @@
 
 (handlers/register-handler-fx
  :stickers/load-packs
- (fn [_ _]
-   {;;TODO request list of packs from contract
-    :http-get-n (mapv (fn [uri] {:url                   uri
-                                 :success-event-creator (fn [o]
-                                                          [:stickers/load-sticker-pack-success o])
-                                 :failure-event-creator (fn [o] nil)})
-                      ;;TODO for testing ONLY
-                      ["https://ipfs.infura.io/ipfs/QmRKmQjXyqpfznQ9Y9dTnKePJnQxoJATivPbGcCAKRsZJq/"])}))
+ (fn [cofx _]
+   (stickers/load-packs cofx)))
+
+(handlers/register-handler-fx
+ :stickers/load-pack
+ (fn [cofx [_ proto-code hash id price open?]]
+   (stickers/load-pack cofx proto-code hash id price open?)))
 
 (handlers/register-handler-fx
  :stickers/select-pack
  (fn [{:keys [db]} [_ id]]
    {:db (assoc db :stickers/selected-pack id)}))
+
+(handlers/register-handler-fx
+ :stickers/open-sticker-pack
+ (fn [cofx [_ id]]
+   (stickers/open-sticker-pack cofx id)))
+
+(handlers/register-handler-fx
+ :stickers/buy-pack
+ (fn [cofx [_ id price]]
+   (stickers/approve-pack cofx id price)))
+
+(handlers/register-handler-fx
+ :stickers/get-owned-packs
+ (fn [cofx _]
+   (stickers/get-owned-pack cofx)))
+
+(handlers/register-handler-fx
+ :stickers/pack-owned
+ (fn [cofx [_ id]]
+   (stickers/pack-owned cofx id)))
+
+(handlers/register-handler-fx
+ :stickers/pending-pack
+ (fn [cofx [_ id]]
+   (stickers/pending-pack cofx id)))
+
+(handlers/register-handler-fx
+ :stickers/pending-timout
+ (fn [cofx _]
+   (stickers/pending-timeout cofx)))
+
+(handlers/register-handler-fx
+ :transport.callback/node-info-fetched
+ (fn [cofx [_ node-info]]
+   (transport/set-node-info cofx node-info)))
+
+;; Tribute to Talk
+(handlers/register-handler-fx
+ :tribute-to-talk.ui/menu-item-pressed
+ (fn [cofx _]
+   (tribute-to-talk/open-settings cofx)))
+
+(handlers/register-handler-fx
+ :tribute-to-talk.ui/learn-more-pressed
+ (fn [cofx _]
+   (tribute-to-talk/open-learn-more cofx)))
+
+(handlers/register-handler-fx
+ :tribute-to-talk.ui/step-back-pressed
+ (fn [cofx _]
+   (tribute-to-talk/step-back cofx)))
+
+(handlers/register-handler-fx
+ :tribute-to-talk.ui/step-forward-pressed
+ (fn [cofx _]
+   (tribute-to-talk/step-forward cofx)))
+
+(handlers/register-handler-fx
+ :tribute-to-talk.ui/numpad-key-pressed
+ (fn [cofx [_ numpad-key]]
+   (tribute-to-talk/update-snt-amount cofx numpad-key)))
+
+(handlers/register-handler-fx
+ :tribute-to-talk.ui/message-changed
+ (fn [cofx [_ message]]
+   (tribute-to-talk/update-message cofx message)))
+
+(handlers/register-handler-fx
+ :tribute-to-talk.ui/edit-pressed
+ (fn [cofx _]
+   (tribute-to-talk/start-editing cofx)))
+
+(handlers/register-handler-fx
+ :tribute-to-talk.ui/remove-pressed
+ (fn [cofx _]
+   (tribute-to-talk/remove cofx)))
+
+(handlers/register-handler-fx
+ :bottom-sheet/show-sheet
+ (fn [cofx [_ view]]
+   (bottom-sheet/show-bottom-sheet
+    cofx
+    {:view view})))
+
+(handlers/register-handler-fx
+ :bottom-sheet/hide-sheet
+ (fn [cofx _]
+   (bottom-sheet/hide-bottom-sheet cofx)))

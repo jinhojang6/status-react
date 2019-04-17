@@ -1,19 +1,5 @@
 pipeline {
-  agent {
-    /* privileged mode is necessary for fuse */
-    docker {
-      label 'linux-new'
-      /* WARNING: remember to keep this up-to-date with the value in docker/linux/Makefile */
-      image 'statusteam/status-build-linux:1.1.0-2a35dcde'
-      args (
-        "--privileged "+
-        "-v /dev/fuse:/dev/fuse "+
-        "-v /var/tmp/lein:/var/tmp/lein:rw "+
-        "-v /var/tmp/npm:/var/tmp/npm:rw "+
-        "-v /opt/desktop-files:/opt/desktop-files:rw"
-      )
-    }
-  }
+  agent { label 'linux' }
 
   parameters {
     string(
@@ -40,14 +26,14 @@ pipeline {
    * https://issues.jenkins-ci.org/browse/JENKINS-49076
    **/
   environment {
-    BUILD_PLATFORM = 'linux'
+    TARGET_OS = 'linux'
     LANG = 'en_US.UTF-8'
     LANGUAGE = 'en_US.UTF-8'
     LC_ALL = 'en_US.UTF-8'
     NPM_CONFIG_CACHE = '/var/tmp/npm'
+    CI_ENVIRONMENT = 'jenkins'
     LEIN_HOME = '/var/tmp/lein'
-    QT_PATH = '/opt/qt'
-    STATUSIM_APPIMAGE_DIR = '/opt/desktop-files'
+    NIX_CONF_DIR = "${env.WORKSPACE}/nix"
     VERBOSE_LEVEL = '3'
   }
 
@@ -58,21 +44,22 @@ pipeline {
           /* Necessary to load methods */
           desktop = load 'ci/desktop.groovy'
           cmn     = load 'ci/common.groovy'
-          print "Running ${cmn.getBuildType()} build!"
-          cmn.abortPreviousRunningBuilds()
+          btype   = cmn.utils.getBuildType()
+          print "Running ${btype} build!"
+          cmn.ci.abortPreviousRunningBuilds()
           /* Cleanup and Prep */
-          desktop.prepDeps()
+          cmn.prep(btype)
         }
       }
     }
     stage('Lint') {
       steps {
-        script { cmn.runLint() }
+        script { cmn.utils.nix_sh('lein cljfmt check') }
       }
     }
     stage('Tests') {
       steps {
-        script { cmn.runTests() }
+        script { cmn.utils.nix_sh('lein test-cljs') }
       }
     }
     stage('Build') {
@@ -87,7 +74,7 @@ pipeline {
     }
     stage('Bundle') {
       steps {
-        script { app = desktop.bundleLinux(cmn.getBuildType()) }
+        script { app = desktop.bundleLinux(btype) }
       }
     }
     stage('Archive') {
@@ -97,17 +84,17 @@ pipeline {
     }
     stage('Upload') {
       steps {
-        script { env.PKG_URL = cmn.uploadArtifact(app) }
+        script { env.PKG_URL = cmn.utils.uploadArtifact(app) }
       }
     }
     stage('Cleanup') {
       steps {
-        script { cmn.clean() }
+        sh 'make clean'
       }
     }
   }
   post {
-    failure { script { load('ci/common.groovy').notifyPRFailure() } }
-    success { script { load('ci/common.groovy').notifyPRSuccess() } }
+    success { script { load('ci/common.groovy').notifyPR(true) } }
+    failure { script { load('ci/common.groovy').notifyPR(false) } }
   }
 }

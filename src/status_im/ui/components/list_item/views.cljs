@@ -18,18 +18,24 @@
       ;;Image
       (when image
         [react/view {:margin-left 16}
-         [image]])
+         (if (vector? image)
+           image
+           [image])])
       (when image-path
         [react/view {:margin-left 16}
          [react/image {:source (utils.image/source image-path)
                        :style  (styles/photo 40)}]])
       ;;Title
       [react/view {:style {:margin-left 16 :flex 1}}
-       [react/text {:style (styles/title small? subtitle)}
+       [react/text {:style           (styles/title small? subtitle)
+                    :number-of-lines 1
+                    :ellipsize-mode  :tail}
         title]
        ;;Subtitle
        (when subtitle
-         [react/text {:style styles/subtitle}
+         [react/text {:style           styles/subtitle
+                      :number-of-lines 1
+                      :ellipsize-mode  :tail}
           subtitle])]
       ;;Accessories
       (for [accessory accessories]

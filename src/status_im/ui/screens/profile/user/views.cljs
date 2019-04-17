@@ -14,6 +14,8 @@
             [status-im.ui.components.react :as react]
             [status-im.ui.components.status-bar.view :as status-bar]
             [status-im.ui.components.toolbar.view :as toolbar]
+            [status-im.ui.components.toolbar.actions :as toolbar.actions]
+            [status-im.ui.components.toolbar.styles :as toolbar.styles]
             [status-im.ui.screens.profile.components.views :as profile.components]
             [status-im.ui.screens.profile.components.styles :as profile.components.styles]
             [status-im.ui.screens.profile.user.styles :as styles]
@@ -28,27 +30,27 @@
             [status-im.utils.universal-links.core :as universal-links]))
 
 (defn my-profile-toolbar []
-  [toolbar/toolbar {}
+  [toolbar/toolbar
+   {}
    nil
-   [toolbar/content-title ""]
-   [react/touchable-highlight
-    {:on-press            #(re-frame/dispatch [:my-profile/start-editing-profile])
+   nil
+   [toolbar/text-action
+    {:handler            #(re-frame/dispatch [:my-profile/start-editing-profile])
      :accessibility-label :edit-button}
-    [react/view
-     [react/text {:style      common.styles/label-action-text
-                  :uppercase? true}
-      (i18n/label :t/edit)]]]])
+    (i18n/label :t/edit)]])
 
 (defn my-profile-edit-toolbar [on-show]
   (reagent/create-class
    {:component-did-mount on-show
-    :reagent-render (fn [] [toolbar/toolbar {}
-                            nil
-                            [toolbar/content-title ""]
-                            [toolbar/default-done {:handler             #(re-frame/dispatch [:my-profile/save-profile])
-                                                   :icon                :main-icons/check
-                                                   :icon-opts           {:color colors/blue}
-                                                   :accessibility-label :done-button}]])}))
+    :reagent-render (fn []
+                      [toolbar/toolbar
+                       {}
+                       nil
+                       nil
+                       [toolbar/text-action
+                        {:handler             #(re-frame/dispatch [:my-profile/save-profile])
+                         :accessibility-label :done-button}
+                        (i18n/label :t/done)]])}))
 
 (def profile-icon-options
   [{:label  (i18n/label :t/image-source-gallery)
@@ -68,9 +70,9 @@
                               :action #(re-frame/dispatch [:my-profile/remove-current-photo])}))
 
 (defn qr-viewer-toolbar [label value]
-  [toolbar/toolbar {:style styles/qr-toolbar}
-   [toolbar/default-done {:icon-opts           {:color colors/black}
-                          :accessibility-label :done-button}]
+  [toolbar/toolbar nil
+   (toolbar/nav-button
+    (toolbar.actions/close toolbar.actions/default-handler))
    [toolbar/content-title label]])
 
 (defn qr-code-share-button [value]
@@ -101,8 +103,12 @@
 
 (defn- my-profile-settings [{:keys [seed-backed-up? mnemonic]}
                             {:keys [dev-mode?
-                                    settings]} currency logged-in?]
-  (let [show-backup-seed? (and (not seed-backed-up?) (not (string/blank? mnemonic)))]
+                                    settings]}
+                            currency
+                            logged-in?
+                            extensions]
+  (let [show-backup-seed? (and (not seed-backed-up?) (not (string/blank? mnemonic)))
+        extensions-settings (vals (get extensions :settings))]
     [react/view
      [profile.components/settings-title (i18n/label :t/settings)]
      [profile.components/settings-item {:label-kw            :t/ens-names
@@ -114,13 +120,18 @@
                                         :action-fn           #(re-frame/dispatch [:navigate-to :currency-settings])
                                         :accessibility-label :currency-button}]
      [profile.components/settings-item-separator]
-     (when config/hardwallet-enabled?
+     (when (and config/hardwallet-enabled?
+                platform/android?)
        [profile.components/settings-item {:label-kw            :t/status-keycard
                                           :accessibility-label :keycard-button
                                           :action-fn           #(re-frame/dispatch [:profile.ui/keycard-settings-button-pressed])}])
      [profile.components/settings-item {:label-kw            :t/notifications
                                         :accessibility-label :notifications-button
                                         :action-fn           #(.openURL react/linking "app-settings://notification/status-im")}]
+     [profile.components/settings-item-separator]
+     [profile.components/settings-item {:label-kw            :t/mobile-network-settings
+                                        :accessibility-label :notifications-button
+                                        :action-fn            #(re-frame/dispatch [:navigate-to :mobile-network-settings])}]
      (when show-backup-seed?
        [profile.components/settings-item-separator])
      (when show-backup-seed?
@@ -144,6 +155,13 @@
       {:label-kw            :t/dapps-permissions
        :accessibility-label :dapps-permissions-button
        :action-fn           #(re-frame/dispatch [:navigate-to :dapps-permissions])}]
+     (when extensions-settings
+       (for [{:keys [label] :as st} extensions-settings]
+         [react/view
+          [profile.components/settings-item-separator]
+          [profile.components/settings-item
+           {:item-text           label
+            :action-fn           #(re-frame/dispatch [:navigate-to :my-profile-ext-settings st])}]]))
      [profile.components/settings-item-separator]
      [profile.components/settings-item
       {:label-kw            :t/need-help
@@ -218,12 +236,17 @@
    [profile.components/settings-switch-item
     {:label-kw  :t/dev-mode
      :value     dev-mode?
-     :action-fn #(re-frame/dispatch [:accounts.ui/dev-mode-switched %])}]])
+     :action-fn #(re-frame/dispatch [:accounts.ui/dev-mode-switched %])}]
+   [profile.components/settings-item-separator]
+   [profile.components/settings-switch-item
+    {:label-kw  :t/chaos-mode
+     :value     (:chaos-mode? settings)
+     :action-fn #(re-frame/dispatch [:accounts.ui/chaos-mode-switched %])}]])
 
 (defview advanced [params on-show]
   (letsubs [advanced? [:get :my-profile/advanced?]]
     {:component-will-unmount #(re-frame/dispatch [:set :my-profile/advanced? false])}
-    [react/view
+    [react/view {:padding-bottom 16}
      [react/touchable-highlight {:on-press #(re-frame/dispatch [:set :my-profile/advanced? (not advanced?)])
                                  :style    styles/advanced-button}
       [react/view {:style styles/advanced-button-container}
@@ -238,7 +261,7 @@
 (defn share-profile-item
   [{:keys [public-key photo-path] :as current-account}]
   [list.views/big-list-item
-   {:text            (i18n/label :t/share-my-profile)
+   {:text                (i18n/label :t/share-my-profile)
     :icon                :main-icons/share
     :accessibility-label :share-my-profile-button
     :action-fn           #(re-frame/dispatch [:navigate-to :profile-qr-viewer
@@ -254,14 +277,38 @@
     :accessory-value     active-contacts-count
     :action-fn           #(re-frame/dispatch [:navigate-to :contacts-list])}])
 
+(defn tribute-to-talk-item [snt-amount seen?]
+  [list.views/big-list-item
+   (cond-> {:text                (i18n/label :t/tribute-to-talk)
+            :icon                :main-icons/tribute-to-talk
+            :accessibility-label :notifications-button
+            :new?                (not seen?)
+            :action-fn           #(re-frame/dispatch
+                                   [:tribute-to-talk.ui/menu-item-pressed])}
+     snt-amount
+     (assoc :accessory-value (str snt-amount " SNT"))
+     (not (and seen? snt-amount))
+     (assoc :subtext (i18n/label :t/tribute-to-talk-desc)))])
+
+(defview extensions-settings []
+  (letsubs [{:keys [label view on-close]} [:get-screen-params :my-profile-ext-settings]]
+    [react/keyboard-avoiding-view {:style {:flex 1}}
+     [status-bar/status-bar {:type :main}]
+     [toolbar/simple-toolbar label]
+     [react/scroll-view
+      [view]]]))
+
 (defview my-profile []
   (letsubs [{:keys [public-key photo-path] :as current-account} [:account/account]
             editing?        [:get :my-profile/editing?]
+            extensions      [:get :extensions/profile]
             changed-account [:get :my-profile/profile]
             currency        [:wallet/currency]
             login-data      [:get :accounts/login]
             scroll          (reagent/atom nil)
-            active-contacts-count [:contacts/active-count]]
+            active-contacts-count [:contacts/active-count]
+            {tribute-to-talk-seen? :seen?
+             snt-amount :snt-amount} [:tribute-to-talk/settings]]
     (let [shown-account    (merge current-account changed-account)
           ;; We scroll on the component once rendered. setTimeout is necessary,
           ;; likely to allow the animation to finish.
@@ -273,25 +320,29 @@
                              (js/setTimeout
                               #(.scrollToEnd @scroll {:animated false})
                               300))]
-      [react/view profile.components.styles/profile
-       (if editing?
-         [my-profile-edit-toolbar on-show-edit]
-         [my-profile-toolbar])
-       [react/scroll-view {:ref                          #(reset! scroll %)
-                           :keyboard-should-persist-taps :handled}
-        [react/view profile.components.styles/profile-form
-         [profile.components/profile-header
-          {:contact              current-account
-           :edited-contact       changed-account
-           :editing?             editing?
-           :allow-icon-change?   true
-           :options              (if (not= (identicon/identicon public-key) photo-path)
-                                   (profile-icon-options-ext)
-                                   profile-icon-options)
-           :on-change-text-event :my-profile/update-name}]]
-        [share-profile-item (dissoc current-account :mnemonic)]
-        [contacts-list-item active-contacts-count]
-        [react/view styles/my-profile-info-container
-         [my-profile-settings current-account shown-account currency (nil? login-data)]]
-        (when (nil? login-data)
-          [advanced shown-account on-show-advanced])]])))
+      [react/keyboard-avoiding-view {:style {:flex 1}}
+       [status-bar/status-bar {:type :main}]
+       [react/view profile.components.styles/profile
+        (if editing?
+          [my-profile-edit-toolbar on-show-edit]
+          [my-profile-toolbar])
+        [react/scroll-view {:ref                          #(reset! scroll %)
+                            :keyboard-should-persist-taps :handled}
+         [react/view profile.components.styles/profile-form
+          [profile.components/profile-header
+           {:contact              current-account
+            :edited-contact       changed-account
+            :editing?             editing?
+            :allow-icon-change?   true
+            :options              (if (not= (identicon/identicon public-key)
+                                            photo-path)
+                                    (profile-icon-options-ext)
+                                    profile-icon-options)
+            :on-change-text-event :my-profile/update-name}]]
+         [share-profile-item (dissoc current-account :mnemonic)]
+         [contacts-list-item active-contacts-count]
+         (when config/tr-to-talk-enabled?
+           [tribute-to-talk-item snt-amount tribute-to-talk-seen?])
+         [my-profile-settings current-account shown-account currency (nil? login-data) extensions]
+         (when (nil? login-data)
+           [advanced shown-account on-show-advanced])]]])))

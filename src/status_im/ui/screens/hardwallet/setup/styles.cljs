@@ -26,7 +26,7 @@
    :border-color    colors/blue-light})
 
 (def maintain-card-text
-  {:font-size          12
+  {:typography         :caption
    :flex               1
    :padding-horizontal 20
    :color              colors/blue})
@@ -41,16 +41,16 @@
    :margin-right     20})
 
 (def maintain-card-current-step-text
-  {:font-size 12
-   :color     colors/blue})
+  {:typography :caption
+   :color      colors/blue})
 
 (def maintain-card-second-step-text
-  {:font-size    12
+  {:typography   :caption
    :padding-left 8
    :color        colors/gray})
 
 (def maintain-card-third-step-text
-  {:font-size    12
+  {:typography   :caption
    :padding-left 8
    :color        colors/gray})
 
@@ -104,18 +104,16 @@
   {:margin-top 37})
 
 (def center-text
-  {:font-size  15
-   :color      colors/gray
+  {:color      colors/gray
    :text-align :center})
 
 (def center-title-text
-  {:font-size   22
-   :font-weight :bold
-   :text-align  :center
-   :color       colors/black})
+  {:typography :header
+   :text-align :center})
 
 (def bottom-container
-  {:height           60
+  {:height           52
+   :width            "100%"
    :justify-content  :center
    :align-items      :center
    :border-top-width 1
@@ -128,8 +126,7 @@
    :flex-direction   :row
    :width            160
    :height           44
-   :border-radius    10
-   :margin-bottom    14})
+   :border-radius    10})
 
 (def begin-button-container
   {:background-color colors/gray-background
@@ -142,9 +139,8 @@
    :margin-bottom    1})
 
 (def bottom-button-text
-  {:font-size      15
-   :color          colors/blue
-   :line-height    20})
+  {:typography :main-medium
+   :color      colors/blue})
 
 (def next-button-container
   {:flex-direction   :row
@@ -168,14 +164,13 @@
    :height         200})
 
 (def wizard-step-text
-  {:font-size      12
+  {:typography     :caption
    :color          colors/blue
    :text-align     :center
    :padding-bottom 18})
 
 (def generating-codes-for-pairing-text
-  {:font-size   15
-   :padding-top 8
+  {:padding-top 8
    :width       314
    :text-align  :center
    :color       colors/gray})
@@ -187,22 +182,16 @@
   {:align-self :center})
 
 (def check-recovery-phrase-text
-  {:font-size   22
-   :font-weight :bold
-   :text-align  :center
-   :color       colors/gray})
+  {:typography :header
+   :text-align :center
+   :color      colors/gray})
 
 (def recovery-phrase-word-n-text
-  {:font-size   22
-   :font-weight :bold
-   :text-align  :center
-   :color       colors/black})
+  {:typography :header
+   :text-align :center})
 
 (def recovery-phrase-description
   {:padding 16})
-
-(def recovery-phrase-description-text
-  {:color colors/black})
 
 (def waiting-indicator-container
   {:height 200})
@@ -228,28 +217,23 @@
    :margin-vertical 25})
 
 (def secret-keys-title-text
-  {:font-size   22
-   :font-weight :bold
-   :text-align  :center
-   :color       colors/black})
+  {:typography :header
+   :text-align :center})
 
 (def secret-keys-image-container
   {:width  120
    :height 120})
 
 (def puk-code-title-text
-  {:font-size   17
-   :font-weight :bold
-   :padding-top 12
-   :color       colors/black})
+  {:typography  :title-bold
+   :padding-top 12})
 
 (def secret-code-explanation-container
   {:margin-top    5
    :margin-bottom 15})
 
 (def puk-code-explanation-text
-  {:font-size          15
-   :padding-horizontal 32
+  {:padding-horizontal 32
    :text-align         :center
    :padding-top        5
    :padding-bottom     10
@@ -263,17 +247,12 @@
   {:border-bottom-width 2
    :width               302
    :text-align          :center
-   ;:justify-content :center
-   ;:align-items :center
-   ;:flex-direction :column
-   ;:padding-bottom      10
    :border-color        colors/gray-lighter})
 
 (defstyle puk-code-numbers-inner-container
   {:width           "85%"
    :android         {:margin-horizontal 16}
    :height          94
-   ;:margin-top      10
    :align-items     :center
    :justify-content :space-between
    :flex-direction  :column
@@ -282,8 +261,7 @@
    :border-radius   10})
 
 (def puk-code-text
-  {:font-size      17
-   :font-weight    :bold
+  {:typography     :title-bold
    :padding-bottom 10
    :text-align     :center
    :color          colors/green})
@@ -308,19 +286,17 @@
    :margin-top 10})
 
 (def enter-pair-code-title-text
-  {:font-size  22
-   :text-align :center
-   :color      colors/black})
+  {:typography :title
+   :text-align :center})
 
 (def enter-pair-code-explanation-text
-  {:font-size   15
-   :padding-top 5
-   :color       colors/gray})
+  {:padding-top        5
+   :text-align         :center
+   :padding-horizontal 60
+   :color              colors/gray})
 
 (def card-is-empty-text
-  {:color         colors/black
-   :font-size     17
-   :font-weight   :bold
+  {:typography    :title-bold
    :margin-bottom 20})
 
 (def card-is-empty-prepare-text
@@ -335,8 +311,7 @@
    :flex-direction :column})
 
 (def remaining-steps-text
-  {:color     colors/gray
-   :font-size 15})
+  {:color colors/gray})
 
 (def remaining-step-row
   {:flex-direction :row
@@ -355,4 +330,3 @@
   {:align-items     :center
    :justify-content :center
    :margin-left     11})
-

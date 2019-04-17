@@ -1,5 +1,6 @@
 (ns status-im.ui.screens.desktop.main.chat.styles
-  (:require [status-im.ui.components.colors :as colors]))
+  (:require [status-im.ui.components.colors :as colors]
+            [status-im.ui.screens.chat.styles.message.message :refer [message-author-name]]))
 
 ;; TODO: see how this could be refactored to be
 ;; automatically alignde with tabs-height in
@@ -37,8 +38,7 @@
    :width              230})
 
 (def author
-  {:color       colors/black
-   :font-weight "500"
+  {:font-weight "500"
    :font-size   14})
 
 (def author-generated
@@ -99,7 +99,7 @@
           :justify-content  :center}))
 
 (def topic-text
-  {:font-size 18.7
+  {:font-size 18
    :color     colors/white})
 
 (def toolbar-chat-view
@@ -134,8 +134,7 @@
          :text-decoration-line :underline))
 
 (def system-message-text
-  {:color colors/black
-   :margin-top -5
+  {:margin-top -5
    :font-size 14})
 
 (def message-container
@@ -210,14 +209,13 @@
    :margin-top    10
    :margin-bottom 5})
 
-(defn chat-title-and-type [pending?]
+(defn chat-title-and-type [added?]
   {:flex 1
-   :justify-content (if pending? :flex-start :center)})
+   :justify-content (if added? :center :flex-start)})
 
 (def chat-title
   {:margin-bottom  4
-   :font-size      14
-   :color          colors/black})
+   :font-size      14})
 
 (def reply-wrapper
   {:flex-direction :column-reverse})
@@ -239,11 +237,10 @@
   {:flex-direction :column
    :padding-bottom 10})
 
-(def reply-content-author
-  {:margin-top     5
-   :color          colors/gray
-   :font-size      12
-   :padding-bottom 3})
+(defn reply-content-author [chosen?]
+  (assoc (message-author-name chosen?)
+         :margin-top     5
+         :padding-bottom 3))
 
 (def reply-content-message
   {:padding-left   7

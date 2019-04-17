@@ -5,10 +5,12 @@
             [reagent.core :as reagent]
             [status-im.ui.components.styles :as styles]
             [status-im.utils.utils :as utils]
+            [status-im.utils.core :as utils.core]
             [status-im.utils.platform :as platform]
             [status-im.i18n :as i18n]
             [status-im.react-native.js-dependencies :as js-dependencies]
-            [status-im.ui.components.colors :as colors]))
+            [status-im.ui.components.colors :as colors]
+            [status-im.ui.components.typography :as typography]))
 
 (defn get-react-property [name]
   (if js-dependencies/react-native
@@ -38,6 +40,7 @@
 (def safe-area-view (get-class "SafeAreaView"))
 (def progress-bar (get-class "ProgressBarAndroid"))
 
+(def status-bar-class (when-not platform/desktop? (get-react-property "StatusBar")))
 (def status-bar (get-class (if platform/desktop? "View" "StatusBar")))
 
 (def scroll-view (get-class "ScrollView"))
@@ -83,44 +86,56 @@
 (def desktop-notification (.-DesktopNotification (.-NativeModules js-dependencies/react-native)))
 
 (def slider (get-class "Slider"))
+
+(def max-font-size-multiplier 1.25)
+
+(defn prepare-text-props [props]
+  (-> props
+      (update :style typography/get-style)
+      (assoc :max-font-size-multiplier max-font-size-multiplier)))
+
 ;; Accessor methods for React Components
-
-(def default-font {:font-family "Inter UI"})
-
-(defn add-font-style [style-key opts]
-  (let [style (get opts style-key)]
-    (-> opts
-        (dissoc :font)
-        (assoc style-key (merge default-font style)))))
-
-(defn transform-to-uppercase [{:keys [uppercase? force-uppercase?]} ts]
-  (if (or force-uppercase? (and uppercase? platform/android?))
-    (vec (map #(when % (string/upper-case %)) ts))
-    ts))
-
 (defn text
-  ([t]
-   [text-class t])
-  ([opts t & ts]
-   (->> (conj ts t)
-        (transform-to-uppercase opts)
-        (concat [text-class (add-font-style :style opts)])
-        (vec))))
+  "For nested text elements, use nested-text instead"
+  ([text-element]
+   [text {} text-element])
+  ([options text-element]
+   [text-class (prepare-text-props options) text-element]))
 
-(defn text-input [{:keys [style] :as opts} text]
-  [text-input-class (merge
-                     {:underline-color-android :transparent
-                      :placeholder-text-color  colors/text-gray
-                      :placeholder             (i18n/label :t/type-a-message)
-                      :value                   text}
-                     (-> opts
-                         (dissoc :font)
-                         (assoc :style (merge default-font style))))])
+(defn nested-text
+  ([options & nested-text-elements]
+   (let [options-with-style (prepare-text-props options)]
+     (reduce (fn [acc text-element]
+               (conj acc
+                     (cond
+                       (string? text-element)
+                       [text-class options-with-style text-element]
+
+                       (vector? text-element)
+                       (let [[options nested-text-elements] text-element]
+                         [nested-text (prepare-text-props
+                                       (utils.core/deep-merge options-with-style
+                                                              options))
+                          nested-text-elements]))))
+             [text-class options-with-style]
+             nested-text-elements))))
+
+(defn text-input
+  [options text]
+  [text-input-class
+   (merge
+    {:underline-color-android  :transparent
+     :max-font-size-multiplier max-font-size-multiplier
+     :placeholder-text-color   colors/text-gray
+     :placeholder              (i18n/label :t/type-a-message)
+     :value                    text}
+    (-> options
+        (update :style typography/get-style)
+        (update :style dissoc :line-height)))])
 
 (defn i18n-text
   [{:keys [style key]}]
-  (let [default-style {:font-size 14}]
-    [text {:style (merge default-style style)} (i18n/label key)]))
+  [text {:style  style} (i18n/label key)])
 
 (defn icon
   ([n] (icon n styles/icon-default))
@@ -165,12 +180,15 @@
     (utils/show-popup (i18n/label :t/error)
                       (i18n/label :t/photos-access-error))))
 
-(defn show-image-picker [images-fn]
-  (let [image-picker (.-default image-picker-class)]
-    (-> image-picker
-        (.openPicker (clj->js {:multiple false}))
-        (.then images-fn)
-        (.catch show-access-error))))
+(defn show-image-picker
+  ([images-fn]
+   (show-image-picker images-fn nil))
+  ([images-fn media-type]
+   (let [image-picker (.-default image-picker-class)]
+     (-> image-picker
+         (.openPicker (clj->js {:multiple false :mediaType (or media-type "any")}))
+         (.then images-fn)
+         (.catch show-access-error)))))
 
 ;; Clipboard
 

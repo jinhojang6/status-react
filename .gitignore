@@ -29,12 +29,14 @@ project.xcworkspace
 #
 .idea
 .gradle
-local.properties
 *.iml
 **/android/.project
 
 # Atom
 .tags*
+
+# VS Code
+.vscode/ipch/
 
 # node.js
 #
@@ -95,9 +97,6 @@ doo-index.html
 
 # Status
 Statusgo.framework
-status-go-local.aar
-status-dev-cli
-status-go-*.zip
 
 #ios
 ios/Pods
@@ -130,6 +129,7 @@ fastlane/README.md
 /VERSION
 /package-lock.json
 /package.json
+/metro.config.js
 /yarn.lock
 /.re-natal
 /re-natal
@@ -149,6 +149,7 @@ Status-Windows-x86_64.exe
 /desktop/lib/*
 /desktop/modules/*
 /desktop/Makefile
+/desktop/graph_info.json
 /desktop/run-app.bat
 /desktop/run-app.sh
 /desktop/CMakeFiles/
@@ -162,3 +163,6 @@ logger_settings.ini
 conan*.txt
 conanbuildinfo.*
 conan.cmake
+
+# Env
+.env.bkp

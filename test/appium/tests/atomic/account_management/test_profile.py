@@ -12,7 +12,7 @@ from views.sign_in_view import SignInView
 class TestProfileSingleDevice(SingleDeviceTestCase):
 
     @marks.testrail_id(5302)
-    @marks.critical
+    @marks.high
     def test_set_profile_picture(self):
         sign_in_view = SignInView(self.driver)
         sign_in_view.create_user()
@@ -52,7 +52,8 @@ class TestProfileSingleDevice(SingleDeviceTestCase):
         profile_view.share_via_messenger()
         if not profile_view.element_by_text_part(public_key).is_element_present():
             self.errors.append("Can't share public key")
-        profile_view.click_system_back_button()
+        for _ in range(2):
+            profile_view.click_system_back_button()
         profile_view.cross_icon.click()
         wallet = profile_view.wallet_button.click()
         wallet.set_up_wallet()
@@ -135,10 +136,10 @@ class TestProfileSingleDevice(SingleDeviceTestCase):
     def test_invite_friends(self):
         sign_in_view = SignInView(self.driver)
         home = sign_in_view.create_user()
-        start_new_chat = home.plus_button.click()
-        start_new_chat.invite_friends_button.click()
-        start_new_chat.share_via_messenger()
-        start_new_chat.find_text_part("Get Status at http://status.im")
+        home.plus_button.click()
+        home.invite_friends_button.click()
+        home.share_via_messenger()
+        home.find_text_part("Get Status at http://status.im")
 
     @marks.testrail_id(5429)
     @marks.medium
@@ -150,7 +151,7 @@ class TestProfileSingleDevice(SingleDeviceTestCase):
         profile_view.get_back_to_home_view()
         wallet_view = profile_view.wallet_button.click()
         wallet_view.set_up_wallet()
-        if 'EUR' != wallet_view.currency_text.text:
+        if not wallet_view.find_text_part('EUR'):
             pytest.fail('EUR currency is not displayed')
 
     @marks.testrail_id(5431)
@@ -163,7 +164,7 @@ class TestProfileSingleDevice(SingleDeviceTestCase):
         sign_in_view.sign_in()
         profile_view = sign_in_view.profile_button.click()
         profile_view.advanced_button.click()
-        profile_view.find_text_part('CUSTOM_ROPSTEN')
+        profile_view.find_text_part('custom_ropsten')
 
     @marks.logcat
     @marks.testrail_id(5419)
@@ -211,7 +212,9 @@ class TestProfileSingleDevice(SingleDeviceTestCase):
         chat_view.chat_options.click_until_presence_of_element(chat_view.view_profile_button)
         chat_view.view_profile_button.click()
         for text in basic_user['username'], 'In contacts', 'Send transaction', 'Send message', 'Contact code':
-            chat_view.find_full_text(text)
+            if not chat_view.element_by_text(text).scroll_to_element():
+                self.errors.append('%s is not visible' % text)
+        self.verify_no_errors()
 
     @marks.testrail_id(5468)
     @marks.medium
@@ -247,7 +250,7 @@ class TestProfileSingleDevice(SingleDeviceTestCase):
         profile.deny_button.wait_for_visibility_of_element(2)
 
     @marks.testrail_id(5299)
-    @marks.critical
+    @marks.high
     def test_user_can_switch_network(self):
         signin_view = SignInView(self.driver)
         home_view = signin_view.create_user()
@@ -255,8 +258,50 @@ class TestProfileSingleDevice(SingleDeviceTestCase):
         profile = home_view.profile_button.click()
         profile.switch_network(network_name)
         profile = home_view.profile_button.click()
-        if not profile.current_active_network == network_name.upper():
+        if not profile.current_active_network == network_name:
             self.driver.fail('Oops! Wrong network selected!')
+
+    @marks.testrail_id(5453)
+    @marks.medium
+    def test_privacy_policy_is_accessible(self):
+        signin_view = SignInView(self.driver)
+        no_link_found_error_msg = 'Could not find privacy policy link at'
+        no_link_open_error_msg = 'Could not open our privacy policy from'
+
+        if not signin_view.privacy_policy_link.is_element_displayed():
+            self.driver.fail('{} Sign in view!'.format(no_link_found_error_msg))
+
+        base_web_view = signin_view.privacy_policy_link.click()
+        base_web_view.open_in_webview()
+        if not base_web_view.policy_summary.is_element_displayed():
+            self.errors.append('{} Sign in view!'.format(no_link_open_error_msg))
+
+        base_web_view.click_system_back_button()
+        signin_view = SignInView(self.driver)
+        home_view = signin_view.create_user()
+        profile = home_view.profile_button.click()
+        about_view = profile.about_button.click()
+        base_web_view = about_view.privacy_policy_button.click()
+
+        if not base_web_view.policy_summary.is_element_displayed():
+            self.errors.append('{} Profile about view!'.format(no_link_open_error_msg))
+
+        base_web_view.click_system_back_button()
+        if about_view.privacy_policy_button.is_element_displayed():
+            base_web_view.click_system_back_button()
+        signin_view = profile.logout()
+        if signin_view.ok_button.is_element_displayed():
+            signin_view.ok_button.click()
+        signin_view.other_accounts_button.click()
+
+        if not signin_view.privacy_policy_link.is_element_displayed():
+            self.driver.fail('{} Sign in view!'.format(no_link_found_error_msg))
+
+        base_web_view = signin_view.privacy_policy_link.click()
+        if not base_web_view.policy_summary.is_element_displayed():
+            self.errors.append('{} Sign in view!'.format(no_link_open_error_msg))
+
+        self.verify_no_errors()
 
 
 @marks.all
@@ -322,6 +367,7 @@ class TestProfileMultipleDevice(MultipleDeviceTestCase):
         profile_1.specify_name_input.set_value(server_name)
         profile_1.mail_server_address_input.set_value(mailserver_address)
         profile_1.save_button.click()
+        profile_1.mail_server_auto_selection_button.click()
         profile_1.mail_server_by_name(server_name).click()
         profile_1.mail_server_connect_button.click()
         profile_1.confirm_button.click()
@@ -338,45 +384,3 @@ class TestProfileMultipleDevice(MultipleDeviceTestCase):
         chat_2.chat_message_input.send_keys(message_1)
         chat_2.send_message_button.click()
         chat_1.chat_element_by_text(message_1).wait_for_visibility_of_element()
-
-    @marks.testrail_id(5453)
-    @marks.medium
-    def test_privacy_policy_is_accessible(self):
-        signin_view = SignInView(self.driver)
-        no_link_found_error_msg = 'Could not find privacy policy link at'
-        no_link_open_error_msg = 'Could not open our privacy policy from'
-
-        if not signin_view.privacy_policy_link.is_element_displayed():
-            self.driver.fail('{} Sign in view!'.format(no_link_found_error_msg))
-
-        base_web_view = signin_view.privacy_policy_link.click()
-        base_web_view.open_in_webview()
-        if not base_web_view.policy_summary.is_element_displayed():
-            self.errors.append('{} Sign in view!'.format(no_link_open_error_msg))
-
-        base_web_view.click_system_back_button()
-        signin_view = SignInView(self.driver)
-        home_view = signin_view.create_user()
-        profile = home_view.profile_button.click()
-        about_view = profile.about_button.click()
-        base_web_view = about_view.privacy_policy_button.click()
-
-        if not base_web_view.policy_summary.is_element_displayed():
-            self.errors.append('{} Profile about view!'.format(no_link_open_error_msg))
-
-        base_web_view.click_system_back_button()
-        if about_view.privacy_policy_button.is_element_displayed():
-            base_web_view.click_system_back_button()
-        signin_view = profile.logout()
-        if signin_view.ok_button.is_element_displayed():
-            signin_view.ok_button.click()
-        signin_view.other_accounts_button.click()
-
-        if not signin_view.privacy_policy_link.is_element_displayed():
-            self.driver.fail('{} Sign in view!'.format(no_link_found_error_msg))
-
-        base_web_view = signin_view.privacy_policy_link.click()
-        if not base_web_view.policy_summary.is_element_displayed():
-            self.errors.append('{} Sign in view!'.format(no_link_open_error_msg))
-
-        self.verify_no_errors()

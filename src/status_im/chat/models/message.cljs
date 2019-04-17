@@ -16,6 +16,7 @@
             [status-im.chat.models.message-content :as message-content]
             [status-im.chat.commands.receiving :as commands-receiving]
             [status-im.chat.db :as chat.db]
+            [status-im.mailserver.core :as mailserver]
             [status-im.utils.clocks :as utils.clocks]
             [status-im.utils.money :as money]
             [status-im.utils.types :as types]
@@ -94,24 +95,28 @@
   (assoc message :outgoing (and (= from current-public-key)
                                 (not (system-message? message)))))
 
-(defn build-desktop-notification [{:keys [db] :as cofx} {:keys [chat-id timestamp content from] :as message}]
-  (let [chat-name'        (chat.db/chat-name (get-in db [:chats chat-id]) from)
-        contact-name'     (if-let [contact-name (get-in db [:contacts/contacts from :name])]
-                            contact-name
-                            (:name (contact.db/public-key->new-contact from)))
-        shown-chat-name   (when-not (= chat-name' contact-name') chat-name') ; No point in repeating contact name if the chat name already contains the same name
+(defn build-desktop-notification
+  [{:keys [db] :as cofx} {:keys [chat-id timestamp content from] :as message}]
+  (let [{:keys [group-chat] :as chat} (get-in db [:chats chat-id])
+        contact-name (get-in db [:contacts/contacts from :name]
+                             (:name (contact.db/public-key->new-contact from)))
+        chat-name        (if group-chat
+                           (chat.db/group-chat-name chat)
+                           contact-name)
+        ;; contact name and chat-name are the same in 1-1 chats
+        shown-chat-name   (when group-chat chat-name)
         timestamp'        (when-not (< (time/seconds-ago (time/to-date timestamp)) 15)
                             (str " @ " (time/to-short-str timestamp)))
         body-first-line   (when (or shown-chat-name timestamp')
                             (str shown-chat-name timestamp' ":\n"))]
-    {:title       contact-name'
+    {:title       contact-name
      :body        (str body-first-line (:text content))
      :prioritary? (not (chat-model/multi-user-chat? cofx chat-id))}))
 
 (fx/defn add-message
   [{:keys [db] :as cofx}
    {{:keys [chat-id message-id clock-value timestamp from] :as message} :message
-    :keys [current-chat? batch? last-clock-value raw-message]}]
+    :keys [current-chat? batch? dedup-id raw-message]}]
   (let [current-public-key (accounts.db/current-public-key cofx)
         prepared-message (-> message
                              (prepare-message chat-id current-chat?)
@@ -126,11 +131,7 @@
               {:db            (cond->
                                (-> db
                                    (update-in [:chats chat-id :messages] assoc message-id prepared-message)
-                                   (update-in [:chats chat-id :last-clock-value]
-                                              (fn [old-clock-value]
-                                                (or last-clock-value
-                                                    (utils.clocks/receive clock-value
-                                                                          old-clock-value)))))
+                                   (update-in [:chats chat-id :last-clock-value] (partial utils.clocks/receive clock-value)))
 
                                 (and (not current-chat?)
                                      (not= from current-public-key))
@@ -138,9 +139,9 @@
                                            (fnil conj #{}) message-id))
                :data-store/tx [(merge
                                 {:transaction (messages-store/save-message-tx prepared-message)}
-                                (when raw-message
+                                (when (or dedup-id raw-message)
                                   {:success-event
-                                   [:message/messages-persisted [raw-message]]}))]}
+                                   [:message/messages-persisted [(or dedup-id raw-message)]]}))]}
               (when (and platform/desktop?
                          (not batch?)
                          (not (system-message? prepared-message)))
@@ -173,7 +174,7 @@
 (fx/defn add-received-message
   [{:keys [db] :as cofx}
    old-id->message
-   {:keys [from message-id chat-id js-obj content] :as raw-message}]
+   {:keys [from message-id chat-id js-obj content dedup-id] :as raw-message}]
   (let [{:keys [web3 current-chat-id view-id]} db
         current-public-key            (accounts.db/current-public-key cofx)
         current-chat?                 (and (or (= :chat view-id)
@@ -189,6 +190,7 @@
     (fx/merge cofx
               (add-message {:batch?       true
                             :message      message
+                            :dedup-id     dedup-id
                             :current-chat current-chat?
                             :raw-message  js-obj})
               ;; Checking :outgoing here only works for now as we don't have a :seen
@@ -271,7 +273,7 @@
         (get all-chats chat-id)
         {:keys [content content-type clock-value]}
         (->> (chat.db/sort-message-groups message-groups messages)
-             first
+             last
              second
              last
              :message-id
@@ -279,43 +281,58 @@
     (chat-model/upsert-chat
      {:chat-id                   chat-id
       :last-message-content      content
-      :last-message-content-type content-type
-      :last-clock-value          clock-value})))
+      :last-message-content-type content-type})))
 
 (fx/defn update-last-messages
   [{:keys [db] :as cofx} chat-ids]
   (apply fx/merge cofx
          (map (partial update-last-message (:chats db)) chat-ids)))
 
+(fx/defn declare-syncd-public-chats!
+  [{:keys [db] :as cofx} chat-ids]
+  (apply fx/merge cofx
+         (map (partial chat-model/join-time-messages-checked db) chat-ids)))
+
+(defn- chat-ids->never-synced-public-chat-ids [chats chat-ids]
+  (let [never-synced-public-chat-ids (mailserver/chats->never-synced-public-chats chats)]
+    (when (seq never-synced-public-chat-ids)
+      (-> never-synced-public-chat-ids
+          (select-keys (vec chat-ids))
+          keys))))
+
 (fx/defn receive-many
   [{:keys [now] :as cofx} messages]
-  (let [valid-messages   (keep #(when-let [chat-id (extract-chat-id cofx %)]
-                                  (assoc % :chat-id chat-id)) messages)
-        filtered-messages (filter-messages cofx valid-messages)
-        deduped-messages (:messages filtered-messages)
-        old-id->message  (:by-old-message-id filtered-messages)
-        chat->message    (group-by :chat-id deduped-messages)
-        chat-ids         (keys chat->message)
-        chats-fx-fns     (map (fn [chat-id]
-                                (let [unviewed-messages-count
-                                      (calculate-unviewed-messages-count
-                                       cofx
-                                       chat-id
-                                       (get chat->message chat-id))]
-                                  (chat-model/upsert-chat
-                                   {:chat-id                 chat-id
-                                    :is-active               true
-                                    :timestamp               now
-                                    :unviewed-messages-count unviewed-messages-count})))
-                              chat-ids)
-        messages-fx-fns (map #(add-received-message old-id->message %) deduped-messages)
-        groups-fx-fns   (map #(update-group-messages chat->message %) chat-ids)]
+  (let [valid-messages               (keep #(when-let [chat-id (extract-chat-id cofx %)]
+                                              (assoc % :chat-id chat-id)) messages)
+        filtered-messages            (filter-messages cofx valid-messages)
+        deduped-messages             (:messages filtered-messages)
+        old-id->message              (:by-old-message-id filtered-messages)
+        chat->message                (group-by :chat-id deduped-messages)
+        chat-ids                     (keys chat->message)
+        never-synced-public-chat-ids (chat-ids->never-synced-public-chat-ids
+                                      (get-in cofx [:db :chats]) chat-ids)
+        chats-fx-fns                 (map (fn [chat-id]
+                                            (let [unviewed-messages-count
+                                                  (calculate-unviewed-messages-count
+                                                   cofx
+                                                   chat-id
+                                                   (get chat->message chat-id))]
+                                              (chat-model/upsert-chat
+                                               {:chat-id                 chat-id
+                                                :is-active               true
+                                                :timestamp               now
+                                                :unviewed-messages-count unviewed-messages-count})))
+                                          chat-ids)
+        messages-fx-fns              (map #(add-received-message old-id->message %) deduped-messages)
+        groups-fx-fns                (map #(update-group-messages chat->message %) chat-ids)]
     (apply fx/merge cofx (concat chats-fx-fns
                                  messages-fx-fns
                                  groups-fx-fns
                                  (when platform/desktop?
                                    [(chat-model/update-dock-badge-label)])
-                                 [(update-last-messages chat-ids)]))))
+                                 [(update-last-messages chat-ids)]
+                                 (when (seq never-synced-public-chat-ids)
+                                   [(declare-syncd-public-chats! never-synced-public-chat-ids)])))))
 
 (defn system-message [{:keys [now] :as cofx} {:keys [clock-value chat-id content from]}]
   (let [{:keys [last-clock-value]} (get-in cofx [:db :chats chat-id])
@@ -377,19 +394,18 @@
                 :last-clock-value          (:clock-value message)})
               (add-message {:batch?           false
                             :message          message-with-id
-                            :current-chat?    true
-                            :last-clock-value (:clock-value message)})
+                            :current-chat?    true})
               (add-own-status chat-id message-id :sending)
               (send chat-id message-id wrapped-record))))
 
-(fx/defn send-push-notification [cofx chat-id message-id fcm-token status]
-  (log/debug "#6772 - send-push-notification" message-id fcm-token)
-  (when (and fcm-token (= status :sent))
+(fx/defn send-push-notification [cofx chat-id message-id fcm-tokens status]
+  (log/debug "#6772 - send-push-notification" message-id fcm-tokens)
+  (when (and (seq fcm-tokens) (= status :sent))
     (let [payload {:from (accounts.db/current-public-key cofx)
                    :to chat-id
                    :id message-id}]
       {:send-notification {:data-payload (notifications/encode-notification-payload payload)
-                           :tokens       [fcm-token]}})))
+                           :tokens       fcm-tokens}})))
 
 (fx/defn update-message-status [{:keys [db]} chat-id message-id status]
   (let [from           (get-in db [:chats chat-id :messages message-id :from])

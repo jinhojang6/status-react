@@ -35,10 +35,8 @@
 (defn text-input [props text]
   [react/text-input (utils.core/deep-merge {:placeholder-text-color colors/white-transparent
                                             :selection-color        colors/white
-                                            :style                  {:color          colors/white
-                                                                     :font-size      15
-                                                                     :height         52
-                                                                     :letter-spacing -0.2}}
+                                            :style                  {:color     colors/white
+                                                                     :height    52}}
                                            props)
    text])
 
@@ -49,10 +47,10 @@
   ([props title] (toolbar props default-action title))
   ([props action title] (toolbar props action title nil))
   ([props action title options]
-   [toolbar/toolbar (utils.core/deep-merge {:style wallet.styles/toolbar}
-                                           props)
+   [toolbar/toolbar (assoc-in props [:style :border-bottom-color] colors/white-light-transparent)
     [toolbar/nav-button action]
-    [toolbar/content-title {:color :white :font-weight "700"}
+    [toolbar/content-title {:color       colors/white
+                            :font-weight "700"}
      title]
     options]))
 
@@ -124,9 +122,9 @@
      [list/item-image icon]
      [list/item-content
       [react/view {:flex-direction :row}
-       [react/text {:style styles/text-list-primary-content}
+       [react/text {:style styles/text}
         name]
-       [react/text {:force-uppercase? true}
+       [react/text {:style {:text-transform :uppercase}}
         (wallet.utils/display-symbol token)]]
       [list/item-secondary (wallet.utils/format-amount amount decimals)]]]]])
 
@@ -199,8 +197,8 @@
                      :accessibility-label (if request? :contact-address-text :recipient-address-text)}
          (ethereum/normalized-address address)]]])))
 
-(defn render-contact [contact]
-  [list/touchable-item #(re-frame/dispatch [:wallet/fill-request-from-contact contact])
+(defn render-contact [contact request?]
+  [list/touchable-item #(re-frame/dispatch [:wallet/fill-request-from-contact contact request?])
    [list/item
     [photos/photo (:photo-path contact) {:size list.styles/image-size}]
     [list/item-content
@@ -211,19 +209,20 @@
       (ethereum/normalized-address (:address contact))]]]])
 
 (views/defview recent-recipients []
-  (views/letsubs [contacts [:contacts/active]]
+  (views/letsubs [contacts           [:contacts/active]
+                  {:keys [request?]} [:get-screen-params :recent-recipients]]
     [simple-screen
      [toolbar (i18n/label :t/recipient)]
      [react/view styles/recent-recipients
       [list/flat-list {:data      contacts
                        :key-fn    :address
-                       :render-fn render-contact}]]]))
+                       :render-fn #(render-contact % request?)}]]]))
 
 (defn contact-code []
   (let [content (reagent/atom nil)]
     (fn []
       [simple-screen {:avoid-keyboard? true}
-       [toolbar {:style wallet.styles/toolbar-bottom-line}
+       [toolbar {:style {:border-bottom-color colors/white-light-transparent}}
         default-action
         (i18n/label :t/recipient)]
        [react/view components.styles/flex
@@ -252,11 +251,11 @@
                                                                                      (i18n/label :t/camera-access-error)))
                                                            50)}]))
 
-(defn- on-choose-recipient [contact-only?]
+(defn- on-choose-recipient [contact-only? request?]
   (list-selection/show {:title   (i18n/label :t/wallet-choose-recipient)
                         :options (concat
                                   [{:label  (i18n/label :t/recent-recipients)
-                                    :action #(re-frame/dispatch [:navigate-to :recent-recipients])}]
+                                    :action #(re-frame/dispatch [:navigate-to :recent-recipients {:request? request?}])}]
                                   (when-not contact-only?
                                     [{:label  (i18n/label :t/scan-qr)
                                       :action request-camera-permissions}
@@ -264,7 +263,7 @@
                                       :action #(re-frame/dispatch [:navigate-to :contact-code])}]))}))
 
 (defn recipient-selector [{:keys [name address disabled? contact-only? request? modal?]}]
-  [cartouche {:on-press  #(on-choose-recipient contact-only?)
+  [cartouche {:on-press  #(on-choose-recipient contact-only? request?)
               :disabled? disabled?
               :icon      :main-icons/more
               :icon-opts {:accessibility-label :choose-contact-button}}
@@ -308,7 +307,5 @@
   [react/view styles/separator])
 
 (defn button-text [label]
-  [react/text {:style      styles/button-text
-               :font       (if platform/android? :medium :default)
-               :uppercase? true}
+  [react/text {:style styles/button-text}
    label])

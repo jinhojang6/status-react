@@ -36,7 +36,6 @@ project.xcworkspace
 #
 .idea
 .gradle
-local.properties
 *.iml
 
 # Atom
@@ -87,7 +86,6 @@ doo-index.html
 
 # Status
 Statusgo.framework
-status-go-local.aar
 status-dev-cli
 
 #ios

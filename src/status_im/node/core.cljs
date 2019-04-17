@@ -77,10 +77,20 @@
       (if utils.platform/desktop? ""
           config/log-level-status-go)))
 
+(defn- ulc-network? [config]
+  (get-in config [:LightEthConfig :ULC] false))
+
+(defn- add-ulc-trusted-nodes [config trusted-nodes]
+  (if (ulc-network? config)
+    (-> config
+        (assoc-in [:LightEthConfig :TrustedNodes] trusted-nodes)
+        (assoc-in [:LightEthConfig :MinTrustedFraction] 50))
+    config))
+
 (defn- get-account-node-config [db address]
   (let [accounts (get db :accounts/accounts)
         current-fleet-key (fleet/current-fleet db address)
-        current-fleet (get fleet/fleets current-fleet-key)
+        current-fleet (get (fleet/fleets db) current-fleet-key)
         rendezvous-nodes (pick-nodes 3 (vals (:rendezvous current-fleet)))
         {:keys [network installation-id settings bootnodes networks]}
         (merge
@@ -110,9 +120,10 @@
                                        :LightClient true
                                        :MinimumPoW 0.001
                                        :EnableNTPSync true}
-             :ShhextConfig        {:BackupDisabledDataDir (utils.platform/no-backup-directory)
-                                   :InstallationID          installation-id
-                                   :MailServerConfirmations config/mailserver-confirmations-enabled?
+             :ShhextConfig        {:BackupDisabledDataDir      (utils.platform/no-backup-directory)
+                                   :InstallationID             installation-id
+                                   :MaxMessageDeliveryAttempts config/max-message-delivery-attempts
+                                   :MailServerConfirmations    config/mailserver-confirmations-enabled?
                                    :PFSEnabled              true}
              :RequireTopics           (get-topics network))
 
@@ -120,6 +131,9 @@
        config/bootnodes-settings-enabled?
        use-custom-bootnodes)
       (add-custom-bootnodes network bootnodes)
+
+      :always
+      (add-ulc-trusted-nodes (vals (:static current-fleet)))
 
       :always
       (add-log-level log-level))))

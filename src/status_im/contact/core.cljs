@@ -2,13 +2,18 @@
   (:require [re-frame.core :as re-frame]
             [status-im.accounts.db :as accounts.db]
             [status-im.chat.models :as chat.models]
+            [clojure.set :as clojure.set]
             [status-im.contact.db :as contact.db]
+            [status-im.contact.device-info :as device-info]
             [status-im.data-store.contacts :as contacts-store]
             [status-im.data-store.messages :as data-store.messages]
             [status-im.data-store.chats :as data-store.chats]
             [status-im.i18n :as i18n]
+            [status-im.transport.utils :as transport.utils]
             [status-im.transport.message.contact :as message.contact]
+            [status-im.transport.message.public-chat :as transport.public-chat]
             [status-im.transport.message.protocol :as protocol]
+            [status-im.contact-code.core :as contact-code]
             [status-im.ui.screens.add-new.new-chat.db :as new-chat.db]
             [status-im.ui.screens.navigation :as navigation]
             [status-im.utils.fx :as fx]
@@ -26,50 +31,49 @@
              (update :contacts/contacts #(merge contacts %))
              (assoc :contacts/blocked (contact.db/get-blocked-contacts all-contacts)))}))
 
-(defn can-add-to-contacts? [{:keys [pending? dapp?]}]
-  (and (not dapp?)
-       (or pending?
-           ;; it's not in the contact list at all
-           (nil? pending?))))
-
-(defn build-contact [{{:keys [chats] :account/keys [account]
-                       :contacts/keys [contacts]} :db} public-key]
-  (cond-> (assoc (contact.db/public-key->contact contacts public-key)
-                 :address (contact.db/public-key->address public-key))
+(defn build-contact
+  [{{:keys [chats] :account/keys [account]
+     :contacts/keys [contacts]} :db} public-key]
+  (cond-> (contact.db/public-key->contact contacts public-key)
     (= public-key (:public-key account))
     (assoc :name (:name account))))
 
-(defn- own-info [db]
+(defn- own-info
+  [db]
   (let [{:keys [name photo-path address]} (:account/account db)
         fcm-token (get-in db [:notifications :fcm-token])]
     {:name          name
      :profile-image photo-path
      :address       address
+     :device-info   (device-info/all {:db db})
      :fcm-token     fcm-token}))
 
-(fx/defn add-new-contact [{:keys [db]} {:keys [public-key] :as contact}]
-  (let [new-contact (assoc contact
-                           :pending? false
-                           :hide-contact? false
-                           :public-key public-key)]
-    {:db            (-> db
-                        (update-in [:contacts/contacts public-key]
-                                   merge new-contact)
-                        (assoc-in [:contacts/new-identity] ""))
-     :data-store/tx [(contacts-store/save-contact-tx new-contact)]}))
+(fx/defn upsert-contact
+  [{:keys [db] :as cofx}
+   {:keys [public-key] :as contact}]
+  (fx/merge cofx
+            {:db            (-> db
+                                (update-in [:contacts/contacts public-key] merge contact))
+             :data-store/tx [(contacts-store/save-contact-tx contact)]}
+            #(when (contact.db/added? contact)
+               (contact-code/listen-to-chat % public-key))))
 
 (fx/defn send-contact-request
-  [{:keys [db] :as cofx} {:keys [public-key pending? dapp?] :as contact}]
-  (when-not dapp?
-    (if pending?
-      (protocol/send (message.contact/map->ContactRequestConfirmed (own-info db)) public-key cofx)
-      (protocol/send (message.contact/map->ContactRequest (own-info db)) public-key cofx))))
+  [{:keys [db] :as cofx} {:keys [public-key] :as contact}]
+  (if (contact.db/pending? contact)
+    (protocol/send (message.contact/map->ContactRequest (own-info db)) public-key cofx)
+    (protocol/send (message.contact/map->ContactRequestConfirmed (own-info db)) public-key cofx)))
 
-(fx/defn add-contact [{:keys [db] :as cofx} public-key]
+(fx/defn add-contact
+  "Add a contact and set pending to false"
+  [{:keys [db] :as cofx} public-key]
   (when (not= (get-in db [:account/account :public-key]) public-key)
-    (let [contact (build-contact cofx public-key)]
+    (let [contact (-> (build-contact cofx public-key)
+                      (update :system-tags
+                              (fnil #(conj % :contact/added) #{})))]
       (fx/merge cofx
-                (add-new-contact contact)
+                {:db (assoc-in db [:contacts/new-identity] "")}
+                (upsert-contact contact)
                 (send-contact-request contact)))))
 
 (fx/defn add-contacts-filter [{:keys [db]} public-key action]
@@ -90,21 +94,23 @@
                           :minPow   1
                           :callback (constantly nil)}]}})))
 
-(fx/defn add-tag
-  "add a tag to the contact"
-  [{:keys [db] :as cofx}]
-  (let [tag (get-in db [:ui/contact :contact/new-tag])
-        public-key (get-in db [:current-chat-id])
-        tags (conj (get-in db [:contacts/contacts public-key :tags] #{}) tag)]
-    {:db (assoc-in db [:contacts/contacts public-key :tags] tags)
-     :data-store/tx [(contacts-store/add-contact-tag-tx public-key tag)]}))
+(fx/defn change-system-tag
+  "remove a system tag from the contact"
+  [{:keys [db] :as cofx} public-key tag change-fn]
+  (let [contact (update (get-in db [:contacts/contacts public-key])
+                        :system-tags (fnil #(change-fn % tag) #{}))]
+    {:db (assoc-in db [:contacts/contacts public-key] contact)
+     :data-store/tx [(contacts-store/save-contact-tx contact)]}))
 
-(fx/defn remove-tag
-  "remove a tag from the contact"
+(fx/defn add-system-tag
+  "add a system tag to the contact"
   [{:keys [db] :as cofx} public-key tag]
-  (let [tags (disj (get-in db [:contacts/contacts public-key :tags] #{}) tag)]
-    {:db (assoc-in db [:contacts/contacts public-key :tags] tags)
-     :data-store/tx [(contacts-store/remove-contact-tag-tx public-key tag)]}))
+  (change-system-tag cofx public-key tag conj))
+
+(fx/defn remove-system-tag
+  "remove a system tag from the contact"
+  [{:keys [db] :as cofx} public-key tag]
+  (change-system-tag cofx public-key tag disj))
 
 (fx/defn block-contact-confirmation
   [cofx public-key]
@@ -169,11 +175,12 @@
             (navigation/navigate-to-clean :home {})))
 
 (fx/defn block-contact
-  [{:keys [db get-user-messages] :as cofx} public-key]
-  (let [contact (assoc (contact.db/public-key->contact
-                        (:contacts/contacts db)
-                        public-key)
-                       :blocked? true)
+  [{:keys [db get-user-messages now] :as cofx} public-key]
+  (let [contact (-> (contact.db/public-key->contact
+                     (:contacts/contacts db)
+                     public-key)
+                    (assoc :last-updated now)
+                    (update :system-tags conj :contact/blocked))
         user-messages (get-user-messages public-key)
         user-messages-ids (map :message-id user-messages)
         ;; we make sure to remove the 1-1 chat which we delete entirely
@@ -200,9 +207,10 @@
                 (navigation/navigate-back)))))
 
 (fx/defn unblock-contact
-  [{:keys [db]} public-key]
-  (let [contact (assoc (get-in db [:contacts/contacts public-key])
-                       :blocked? false)]
+  [{:keys [db now]} public-key]
+  (let [contact (-> (get-in db [:contacts/contacts public-key])
+                    (assoc :last-updated now)
+                    (update :system-tags disj :contact/blocked))]
     {:db (-> db
              (update :contacts/blocked disj public-key)
              (assoc-in [:contacts/contacts public-key] contact))
@@ -211,7 +219,7 @@
 (defn handle-contact-update
   [public-key
    timestamp
-   {:keys [name profile-image address fcm-token] :as m}
+   {:keys [name profile-image address fcm-token device-info] :as m}
    {{:contacts/keys [contacts] :as db} :db :as cofx}]
   ;; We need to convert to timestamp ms as before we were using now in ms to
   ;; set last updated
@@ -229,40 +237,31 @@
 
             ;; Backward compatibility with <= 0.9.21, as they don't send
             ;; fcm-token & address in contact updates
-            contact-props    (cond->
-                              {:public-key   public-key
-                               :photo-path   profile-image
-                               :name         name
-                               :address      (or address
-                                                 (:address contact)
-                                                 (contact.db/public-key->address public-key))
-                               :last-updated timestamp-ms
-                                  ;;NOTE (yenda) in case of concurrent contact request
-                               :pending?     (get contact :pending? true)}
-                               fcm-token (assoc :fcm-token fcm-token))]
-        ;;NOTE (yenda) only update if there is changes to the contact
-        (when-not (= contact-props
-                     (select-keys contact [:public-key :address :photo-path
-                                           :name :fcm-token :pending?]))
-          {:db            (update-in db [:contacts/contacts public-key]
-                                     merge contact-props)
-           :data-store/tx [(contacts-store/save-contact-tx
-                            contact-props)]})))))
+            contact-props
+            (cond-> {:public-key   public-key
+                     :photo-path   profile-image
+                     :name         name
+                     :address      (or address
+                                       (:address contact)
+                                       (contact.db/public-key->address public-key))
+                     :device-info  (device-info/merge-info
+                                    timestamp
+                                    (:device-info contact)
+                                    device-info)
+                     :last-updated timestamp-ms
+                     :system-tags  (conj (get contact :system-tags #{})
+                                         :contact/request-received)}
+              fcm-token (assoc :fcm-token fcm-token))]
+        (upsert-contact cofx contact-props)))))
 
 (def receive-contact-request handle-contact-update)
 (def receive-contact-request-confirmation handle-contact-update)
 (def receive-contact-update handle-contact-update)
 
-(fx/defn add-contact-and-open-chat
+(fx/defn open-chat
   [cofx public-key]
   (fx/merge cofx
-            (add-contact public-key)
             (chat.models/start-chat public-key {:navigation-reset? true})))
-
-(fx/defn hide-contact
-  [{:keys [db]} public-key]
-  (when (get-in db [:contacts/contacts public-key])
-    {:db (assoc-in db [:contacts/contacts public-key :hide-contact?] true)}))
 
 (fx/defn handle-qr-code
   [{:keys [db] :as cofx} contact-identity]
@@ -272,12 +271,12 @@
     (if (some? validation-result)
       {:utils/show-popup {:title (i18n/label :t/unable-to-read-this-code)
                           :content validation-result
-                          :on-dismiss #(re-frame/dispatch [:navigate-to-clean :home])}}
+                          :on-dismiss #(re-frame/dispatch [:qr-scanner.ui/qr-code-error-dismissed])}}
       (fx/merge cofx
                 fx
                 (if config/partitioned-topic-enabled?
-                  (add-contacts-filter contact-identity :add-contact-and-open-chat)
-                  (add-contact-and-open-chat contact-identity))))))
+                  (add-contacts-filter contact-identity :open-chat)
+                  (open-chat contact-identity))))))
 
 (fx/defn open-contact-toggle-list
   [{:keys [db :as cofx]}]
@@ -290,4 +289,4 @@
 (fx/defn add-new-identity-to-contacts
   [{{:contacts/keys [new-identity]} :db :as cofx}]
   (when (seq new-identity)
-    (add-contact-and-open-chat cofx new-identity)))
+    (open-chat cofx new-identity)))

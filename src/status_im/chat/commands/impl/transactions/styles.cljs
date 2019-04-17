@@ -19,9 +19,6 @@
    :margin-left  14
    :margin-right 12})
 
-(def asset-symbol
-  {:color colors/black})
-
 (def asset-name
   {:color        colors/gray
    :padding-left 4})
@@ -39,7 +36,8 @@
   {:margin-top     6
    :flex-direction :row})
 
-(defn command-send-status-icon [outgoing]
+(defn command-send-status-icon
+  [outgoing]
   {:background-color (if outgoing
                        colors/black-transparent
                        colors/blue-light)
@@ -49,12 +47,14 @@
    :padding-top      4
    :padding-left     4})
 
-(defnstyle command-send-status-text [outgoing]
-  {:color       (if outgoing colors/white-transparent colors/blue)
-   :android     {:margin-top 3}
-   :ios         {:margin-top 4}
-   :margin-left 6
-   :font-size   12})
+(defn command-send-status-text
+  [outgoing]
+  {:typography  :caption
+   :color       (if outgoing
+                  colors/white-transparent
+                  colors/blue)
+   :margin-top  4
+   :margin-left 6})
 
 (def command-send-message-view
   {:flex-direction :column
@@ -69,10 +69,12 @@
    :align-items    :flex-end
    :max-width      250})
 
-(defnstyle command-send-amount-text [outgoing]
+(defn command-send-amount-text
+  [outgoing]
   {:font-size   22
-   :color       (if outgoing colors/white colors/blue)
-   :ios         {:letter-spacing -0.5}})
+   :line-height 28
+   :font-weight "600"
+   :color       (if outgoing colors/white colors/blue)})
 
 (def command-send-currency
   {:flex-direction :column
@@ -80,18 +82,16 @@
 
 (defn command-amount-currency-separator [outgoing]
   {:opacity 0
-   :color   (if outgoing colors/blue colors/white)})
+   :color   (if outgoing colors/blue colors/blue-light)})
 
 (defn command-send-currency-text [outgoing]
-  {:font-size      22
-   :margin-left    4
-   :letter-spacing 1
-   :color          (if outgoing colors/white-transparent colors/blue-light)})
+  {:font-size   22
+   :margin-left 4
+   :color       (if outgoing colors/white-transparent colors/gray)})
 
 (defn command-request-currency-text [outgoing]
-  {:font-size      22
-   :letter-spacing 1
-   :color          (if outgoing colors/wild-blue-yonder colors/gray)})
+  {:font-size 22
+   :color     (if outgoing colors/wild-blue-yonder colors/gray)})
 
 (defn command-request-timestamp-text [outgoing]
   {:font-size 12
@@ -103,13 +103,12 @@
    :margin-top      6})
 
 (defn command-send-fiat-amount-text [outgoing]
-  {:font-size 12
-   :color     (if outgoing colors/white colors/black)})
+  {:typography :caption
+   :color      (if outgoing colors/white colors/black)})
 
 (def command-send-recipient-text
   {:color       colors/blue
-   :font-size   14
-   :line-height 18})
+   :font-size   14})
 
 (defn command-send-timestamp [outgoing]
   {:color      (if outgoing colors/white-transparent colors/gray)
@@ -142,7 +141,7 @@
 (defn command-request-message-view [outgoing]
   {:border-radius    14
    :padding-vertical 4
-   :background-color (if outgoing colors/blue colors/white)})
+   :background-color (if outgoing colors/blue colors/blue-light)})
 
 (defn command-request-header-text [outgoing]
   {:font-size 12
@@ -152,10 +151,9 @@
   {:flex-direction :row
    :margin-top     6})
 
-(defnstyle command-request-amount-text [outgoing]
-  {:font-size   22
-   :ios         {:letter-spacing -0.5}
-   :color       (if outgoing colors/white colors/black)})
+(defn command-request-amount-text [outgoing]
+  {:font-size 22
+   :color     (if outgoing colors/white colors/black)})
 
 (def command-request-separator-line
   {:background-color colors/gray-light
@@ -168,8 +166,7 @@
    :padding-top 8})
 
 (defn command-request-button-text [answered?]
-  {:font-size 15
-   :color     (if answered? colors/gray colors/blue)})
+  {:color (if answered? colors/gray colors/blue)})
 
 (def command-request-fiat-amount-row
   {:margin-top 6})
@@ -180,12 +177,10 @@
 
 (def command-request-recipient-text
   {:color       colors/blue
-   :font-size   14
-   :line-height 18})
+   :font-size   14})
 
 (def command-request-network-text
   {:color colors/red})
 
 (def command-request-timestamp-row
   {:margin-top 6})
-

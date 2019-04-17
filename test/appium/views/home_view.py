@@ -1,6 +1,6 @@
 import time
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from views.base_element import BaseButton, BaseText, BaseElement
+from views.base_element import BaseButton, BaseText, BaseElement, BaseEditBox
 from views.base_view import BaseView
 
 
@@ -15,15 +15,43 @@ class PlusButton(BaseButton):
         super(PlusButton, self).__init__(driver)
         self.locator = self.Locator.accessibility_id("new-chat-button")
 
-    def navigate(self):
-        from views.start_new_chat_view import StartNewChatView
-        return StartNewChatView(self.driver)
 
-    def click(self):
-        from views.start_new_chat_view import StartNewChatButton
-        desired_element = StartNewChatButton(self.driver)
-        self.click_until_presence_of_element(desired_element=desired_element)
-        return self.navigate()
+class StartNewChatButton(BaseButton):
+    def __init__(self, driver):
+        super(StartNewChatButton, self).__init__(driver)
+        self.locator = self.Locator.accessibility_id('start-1-1-chat-button')
+
+    def navigate(self):
+        from views.contacts_view import ContactsView
+        return ContactsView(self.driver)
+
+
+class NewGroupChatButton(BaseButton):
+
+    def __init__(self, driver):
+        super(NewGroupChatButton, self).__init__(driver)
+        self.locator = self.Locator.accessibility_id('start-group-chat-button')
+
+    def navigate(self):
+        from views.contacts_view import ContactsView
+        return ContactsView(self.driver)
+
+
+class JoinPublicChatButton(BaseButton):
+
+    def __init__(self, driver):
+        super(JoinPublicChatButton, self).__init__(driver)
+        self.locator = self.Locator.accessibility_id('join-public-chat-button')
+
+    def navigate(self):
+        from views.contacts_view import ContactsView
+        return ContactsView(self.driver)
+
+
+class InviteFriendsButton(BaseButton):
+    def __init__(self, driver):
+        super(InviteFriendsButton, self).__init__(driver)
+        self.locator = self.Locator.accessibility_id('invite-friends-button')
 
 
 class ChatElement(BaseButton):
@@ -60,18 +88,18 @@ class ChatElement(BaseButton):
         class DeleteButton(BaseButton):
             def __init__(self, driver, parent_locator: str):
                 super(DeleteButton, self).__init__(driver)
-                locator_str = "/../../android.view.ViewGroup/*[@content-desc='icon']"
+                locator_str = "/../..//*[@content-desc='icon']"
                 self.locator = self.Locator.xpath_selector(parent_locator + locator_str)
 
         return DeleteButton(self.driver, self.locator.value)
 
     def swipe_and_delete(self):
         counter = 0
-        while counter < 10:
+        while counter < 3:
             self.swipe_element()
             if self.swipe_delete_button.is_element_present():
                 break
-            time.sleep(10)
+            time.sleep(3)
             counter += 1
         self.swipe_delete_button.click()
 
@@ -98,6 +126,12 @@ class ChatUrlText(BaseText):
         self.locator = self.Locator.accessibility_id('chat-url-text')
 
 
+class SearchChatInput(BaseEditBox):
+    def __init__(self, driver):
+        super().__init__(driver)
+        self.locator = self.Locator.xpath_selector('//android.widget.EditText')
+
+
 class HomeView(BaseView):
     def __init__(self, driver):
         super(HomeView, self).__init__(driver)
@@ -105,6 +139,12 @@ class HomeView(BaseView):
         self.plus_button = PlusButton(self.driver)
         self.chat_name_text = ChatNameText(self.driver)
         self.chat_url_text = ChatUrlText(self.driver)
+        self.search_chat_input = SearchChatInput(self.driver)
+
+        self.start_new_chat_button = StartNewChatButton(self.driver)
+        self.new_group_chat_button = NewGroupChatButton(self.driver)
+        self.join_public_chat_button = JoinPublicChatButton(self.driver)
+        self.invite_friends_button = InviteFriendsButton(self.driver)
 
     def wait_for_syncing_complete(self):
         self.driver.info('Waiting for syncing complete:')
@@ -119,54 +159,49 @@ class HomeView(BaseView):
         return ChatElement(self.driver, username[:25])
 
     def add_contact(self, public_key):
-        start_new_chat = self.plus_button.click()
-        start_new_chat.start_new_chat_button.click_until_presence_of_element(start_new_chat.public_key_edit_box)
-        start_new_chat.public_key_edit_box.click()
-        start_new_chat.public_key_edit_box.send_keys(public_key)
+        self.plus_button.click()
+        contacts_view = self.start_new_chat_button.click()
+        contacts_view.public_key_edit_box.click()
+        contacts_view.public_key_edit_box.send_keys(public_key)
         one_to_one_chat = self.get_chat_view()
-        start_new_chat.confirm_until_presence_of_element(one_to_one_chat.chat_message_input)
+        contacts_view.confirm_until_presence_of_element(one_to_one_chat.chat_message_input)
+        one_to_one_chat.add_to_contacts.click()
         return one_to_one_chat
 
     def start_1_1_chat(self, username):
-        start_new_chat = self.plus_button.click()
-        start_new_chat.start_new_chat_button.click()
+        self.plus_button.click()
+        self.start_new_chat_button.click()
         self.element_by_text(username).click()
         from views.chat_view import ChatView
         return ChatView(self.driver)
 
     def create_group_chat(self, user_names_to_add: list, group_chat_name: str = 'new_group_chat'):
-        start_new_chat = self.plus_button.click()
-        start_new_chat.new_group_chat_button.click()
+        self.plus_button.click()
+        contacts_view = self.new_group_chat_button.click()
         for user_name in user_names_to_add:
-            user_contact = start_new_chat.get_username_checkbox(user_name)
+            user_contact = contacts_view.get_username_checkbox(user_name)
             user_contact.scroll_to_element()
             user_contact.click()
-        start_new_chat.next_button.click()
-        start_new_chat.chat_name_editbox.send_keys(group_chat_name)
-        start_new_chat.create_button.click()
+        contacts_view.next_button.click()
+        contacts_view.chat_name_editbox.send_keys(group_chat_name)
+        contacts_view.create_button.click()
         from views.chat_view import ChatView
         return ChatView(self.driver)
 
     def join_public_chat(self, chat_name: str):
-        start_new_chat = self.plus_button.click()
-        start_new_chat.join_public_chat_button.click()
-        start_new_chat.chat_name_editbox.click()
-        start_new_chat.chat_name_editbox.send_keys(chat_name)
+        self.plus_button.click()
+        contacts_view = self.join_public_chat_button.click()
+        contacts_view.chat_name_editbox.click()
+        contacts_view.chat_name_editbox.send_keys(chat_name)
         time.sleep(2)
         chat_view = self.get_chat_view()
-        start_new_chat.confirm_until_presence_of_element(chat_view.chat_message_input)
+        self.confirm_until_presence_of_element(chat_view.chat_message_input)
         return chat_view
 
     def open_status_test_dapp(self, allow_all=True):
-        profile_view = self.profile_button.click()
-        profile_view.advanced_button.click()
-        profile_view.debug_mode_toggle.click()
-        home_view = profile_view.home_button.click()
-        start_new_chat_view = home_view.plus_button.click()
-        start_new_chat_view.open_d_app_button.click()
-        start_new_chat_view.status_test_dapp_button.scroll_to_element()
-        status_test_dapp = start_new_chat_view.status_test_dapp_button.click()
-        start_new_chat_view.open_button.click()
+        dapp_view = self.dapp_tab_button.click()
+        dapp_view.open_url('simpledapp.eth')
+        status_test_dapp = dapp_view.get_status_test_dapp_view()
         for _ in range(2):
             if allow_all:
                 status_test_dapp.allow_button.click()

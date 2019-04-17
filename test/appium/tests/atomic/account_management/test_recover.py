@@ -14,6 +14,7 @@ class TestRecoverAccountSingleDevice(SingleDeviceTestCase):
     @marks.testrail_id(5301)
     @marks.critical
     @marks.battery_consumption
+    @marks.skip
     def test_recover_account(self):
         sign_in = SignInView(self.driver)
         home = sign_in.create_user()
@@ -67,7 +68,7 @@ class TestRecoverAccountSingleDevice(SingleDeviceTestCase):
 
 class TestRecoverAccessFromSignInScreen(SingleDeviceTestCase):
     @marks.testrail_id(5363)
-    @marks.critical
+    @marks.high
     def test_pass_phrase_validation(self):
         signin_view = SignInView(self.driver)
         recover_access_view = signin_view.i_have_account_button.click()
@@ -137,7 +138,7 @@ class TestRecoverAccessFromSignInScreen(SingleDeviceTestCase):
         self.verify_no_errors()
 
     @marks.testrail_id(5499)
-    @marks.critical
+    @marks.medium
     def test_passphrase_whitespaces_ignored_while_recovering_access(self):
         signin_view = SignInView(self.driver)
         sender = transaction_senders['U']
@@ -158,3 +159,10 @@ class TestRecoverAccessFromSignInScreen(SingleDeviceTestCase):
         recover_access_view.send_as_keyevent(capitalized_passphrase)
         if recover_access_view.passphrase_input.text != passphrase:
             self.driver.fail('Upper case was not replaced by lower case!')
+
+    @marks.testrail_id(5719)
+    @marks.medium
+    def test_special_characters_in_password_when_recover_account(self):
+        sign_in = SignInView(self.driver)
+        sign_in.recover_access(passphrase=basic_user['passphrase'], password=basic_user['special_chars_password'])
+        sign_in.relogin(password=basic_user['special_chars_password'])

@@ -4,9 +4,7 @@
 
 (def group-chat-name-input
   {:font-size      17
-   :padding-bottom 0
-   :letter-spacing -0.2
-   :color          colors/black})
+   :padding-bottom 0})
 
 (def topic-hash
   (merge group-chat-name-input
@@ -20,11 +18,9 @@
 (def chat-name-container
   {:margin-top 10})
 
-(defstyle members-text
-  {:color   colors/gray
-   :ios     {:letter-spacing -0.2
-             :font-size      16}
-   :android {:font-size 14}})
+(def members-text
+  {:color     colors/gray
+   :font-size 16})
 
 (def section-title
   (merge members-text
@@ -39,8 +35,9 @@
    :justify-content  :center})
 
 (def public-chat-icon-symbol
-  {:font-size 20
-   :color     colors/white})
+  {:font-size      20
+   :text-transform :uppercase
+   :color          colors/white})
 
 (def input-container
   {:padding          0

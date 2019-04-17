@@ -12,7 +12,8 @@
             [taoensso.timbre :as log]
             [status-im.utils.fx :as fx]
             [re-frame.core :as re-frame]
-            [re-frame.db])
+            [re-frame.db]
+            [status-im.utils.config :as config])
   (:require-macros
    [cljs.core.async.macros :refer [go-loop go]]))
 
@@ -167,7 +168,7 @@
     (when (etherscan-supported? chain)
       (let [network-subdomain (when-let [subdomain (network->subdomain chain)]
                                 (str subdomain "."))]
-        (str "https://" network-subdomain  "etherscan.io/tx/" hash)))))
+        (str "https://" network-subdomain "etherscan.io/tx/" hash)))))
 
 (def etherscan-api-key "DMSI4UAAKUBVGCDMVP3H2STAMSAUV7BYFI")
 
@@ -177,12 +178,17 @@
     (:mainnet) "api"
     (:rinkeby) "api-rinkeby"))
 
-(defn- get-transaction-url [chain account]
-  {:pre [(keyword? chain) (string? account)]
-   :post [(string? %)]}
-  (let [network-subdomain (get-api-network-subdomain chain)]
-    (str "https://" network-subdomain ".etherscan.io/api?module=account&action=txlist&address=0x"
-         account "&startblock=0&endblock=99999999&sort=desc&apikey=" etherscan-api-key "&q=json")))
+(defn- get-transaction-url
+  ([chain account] (get-transaction-url chain account false))
+  ([chain account chaos-mode?]
+   {:pre  [(keyword? chain) (string? account)]
+    :post [(string? %)]}
+   (let [network-subdomain (get-api-network-subdomain chain)]
+     (if chaos-mode?
+       "http://httpstat.us/500"
+       (str "https://" network-subdomain
+            ".etherscan.io/api?module=account&action=txlist&address=0x"
+            account "&startblock=0&endblock=99999999&sort=desc&apikey=" etherscan-api-key "&q=json")))))
 
 (defn- format-transaction [account
                            {:keys [value timeStamp blockNumber hash from to
@@ -217,77 +223,32 @@
              (map (juxt :hash identity)))
             result))))
 
-(defn- etherscan-transactions [chain account on-success on-error]
-  (if (etherscan-supported? chain)
-    (let [url (get-transaction-url chain account)]
-      (log/debug "HTTP GET" url)
-      (http/get url
-                #(on-success (format-transactions-response % account))
-                on-error))
-    (log/info "Etherscan not supported for " chain)))
+(defn- etherscan-transactions
+  ([chain account on-success on-error]
+   (etherscan-transactions chain account on-success on-error false))
+  ([chain account on-success on-error chaos-mode?]
+   (if (etherscan-supported? chain)
+     (let [url (get-transaction-url chain account chaos-mode?)]
+       (log/debug "HTTP GET" url)
+       (http/get url
+                 #(on-success (format-transactions-response % account))
+                 on-error))
+     (log/info "Etherscan not supported for " chain))))
 
-(defn- get-transactions [{:keys [web3 chain chain-tokens account-address success-fn error-fn]}]
+(defn- get-transactions [{:keys [web3 chain chain-tokens account-address
+                                 success-fn error-fn chaos-mode?]}]
   (log/debug "Syncing transactions data..")
   (etherscan-transactions chain
                           account-address
                           success-fn
-                          error-fn)
+                          error-fn
+                          chaos-mode?)
   (doseq [direction [:inbound :outbound]]
     (get-token-transactions web3
                             chain-tokens
                             direction
                             account-address
                             success-fn)))
-
-;; ---------------------------------------------------------------------------
-;; Periodic background job
-;; ---------------------------------------------------------------------------
-
-(defn- async-periodic-run!
-  ([async-periodic-chan]
-   (async-periodic-run! async-periodic-chan true))
-  ([async-periodic-chan worker-fn]
-   (async/put! async-periodic-chan worker-fn)))
-
-(defn- async-periodic-stop! [async-periodic-chan]
-  (async/close! async-periodic-chan))
-
-(defn- async-periodic-exec
-  "Periodically execute an function.
-
-  Takes a work-fn of one argument `finished-fn -> any` this function
-  is passed a finished-fn that must be called to signal that the work
-  being performed in the work-fn is finished.
-
-  Returns a go channel that represents a way to control the looping process.
-
-  Stop the polling loop with `async-periodic-stop!`
-
-  The work-fn can be forced to run immediately with `async-periodic-run!`
-
-  Or you can queue up another fn `finished-fn -> any` to execute on
-  the queue with `async-periodic-run!`."
-  [work-fn interval-ms timeout-ms]
-  {:pre [(fn? work-fn) (integer? interval-ms) (integer? timeout-ms)]}
-  (let [do-now-chan (async/chan (async/sliding-buffer 1))
-        try-it (fn [exec-fn catch-fn] (try (exec-fn) (catch :default e (catch-fn e))))]
-    (go-loop []
-      (let [timeout (async-util/timeout interval-ms)
-            finished-chan (async/promise-chan)
-            [v ch] (async/alts! [do-now-chan timeout])
-            worker (if (and (= ch do-now-chan) (fn? v))
-                     v work-fn)]
-        (when-not (and (= ch do-now-chan) (nil? v))
-          ;; don't let try catch be parsed by go-block
-          (try-it #(worker (fn [] (async/put! finished-chan true)))
-                  (fn [e]
-                    (log/error "failed to run transaction sync" e)
-                    ;; if an error occurs in work-fn log it and consider it done
-                    (async/put! finished-chan true)))
-          ;; sanity timeout for work-fn
-          (async/alts! [finished-chan (async-util/timeout timeout-ms)])
-          (recur))))
-    do-now-chan))
 
 ;; -----------------------------------------------------------------------------
 ;; Helpers functions that help determine if a background sync should execute
@@ -369,7 +330,7 @@
 
 (defonce polling-executor (atom nil))
 
-(defn transactions-query-helper [web3 all-tokens account-address chain done-fn]
+(defn transactions-query-helper [web3 all-tokens account-address chain done-fn chaos-mode?]
   (get-transactions
    {:account-address account-address
     :chain           chain
@@ -387,18 +348,20 @@
                   (done-fn))
     :error-fn   (fn [http-error]
                   (log/debug "Unable to get transactions: " http-error)
-                  (done-fn))}))
+                  (done-fn))
+    :chaos-mode? chaos-mode?}))
 
 (defn- sync-now! [{:keys [network-status :account/account :wallet/all-tokens app-state network web3] :as opts}]
   (when @polling-executor
     (let [chain (ethereum/network->chain-keyword (get-in account [:networks network]))
-          account-address (:address account)]
+          account-address (:address account)
+          chaos-mode? (get-in account [:settings :chaos-mode?])]
       (when (and (not= network-status :offline)
                  (= app-state "active")
                  (not= :custom chain))
-        (async-periodic-run!
+        (async-util/async-periodic-run!
          @polling-executor
-         (partial transactions-query-helper web3 all-tokens account-address chain))))))
+         #(transactions-query-helper web3 all-tokens account-address chain % chaos-mode?))))))
 
 ;; this function handles background syncing of transactions
 (defn- background-sync [web3 account-address done-fn]
@@ -412,18 +375,19 @@
       (done-fn)
       (let [chat-transaction-ids (chat-map->transaction-ids network chats)
             transaction-map (:transactions wallet)
-            transaction-ids (set (keys transaction-map))]
+            transaction-ids (set (keys transaction-map))
+            chaos-mode? (get-in account [:settings :chaos-mode?])]
         (if-not (or (have-unconfirmed-transactions? (vals transaction-map))
                     (not-empty (set/difference chat-transaction-ids transaction-ids)))
           (done-fn)
-          (transactions-query-helper web3 all-tokens account-address chain done-fn))))))
+          (transactions-query-helper web3 all-tokens account-address chain done-fn chaos-mode?))))))
 
 (defn- start-sync! [{:keys [:account/account network web3] :as options}]
   (let [account-address (:address account)]
     (when @polling-executor
-      (async-periodic-stop! @polling-executor))
+      (async-util/async-periodic-stop! @polling-executor))
     (reset! polling-executor
-            (async-periodic-exec
+            (async-util/async-periodic-exec
              (partial #'background-sync web3 account-address)
              sync-interval-ms
              sync-timeout-ms)))
@@ -442,7 +406,7 @@
 (re-frame/reg-fx
  ::stop-sync-transactions
  #(when @polling-executor
-    (async-periodic-stop! @polling-executor)))
+    (async-util/async-periodic-stop! @polling-executor)))
 
 (fx/defn stop-sync [_]
   {::stop-sync-transactions nil})

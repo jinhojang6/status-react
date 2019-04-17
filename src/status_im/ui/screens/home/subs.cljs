@@ -1,12 +1,19 @@
 (ns status-im.ui.screens.home.subs
-  (:require [re-frame.core :as re-frame]))
+  (:require [re-frame.core :as re-frame]
+            [status-im.utils.platform :as platform]))
 
 (re-frame/reg-sub
  :home-items
  :<- [:chats/active-chats]
- :<- [:browser/browsers]
- (fn [[chats browsers]]
-   (sort-by #(-> % second :timestamp) > (merge chats browsers))))
+ :<- [:search/filter]
+ :<- [:search/filtered-chats]
+ (fn [[chats search-filter filtered-chats]]
+   (if (or (nil? search-filter)
+           (and platform/desktop? (empty? search-filter)))
+     {:all-home-items
+      (sort-by #(-> % second :timestamp) > chats)}
+     {:search-filter search-filter
+      :chats filtered-chats})))
 
 (re-frame/reg-sub
  :chain-sync-state

@@ -19,7 +19,9 @@
             [status-im.utils.types :as types]
             [taoensso.timbre :as log]
             [status-im.utils.fx :as fx]
-            [status-im.node.core :as node]))
+            [status-im.node.core :as node]
+            [status-im.ui.screens.mobile-network-settings.events :as mobile-network]
+            [status-im.utils.platform :as platform]))
 
 (defn get-signing-phrase [cofx]
   (assoc cofx :signing-phrase (signing-phrase/generate)))
@@ -64,7 +66,7 @@
    {:keys [pubkey address mnemonic installation-id
            keycard-instance-uid keycard-pairing keycard-paired-on]}
    password
-   {:keys [seed-backed-up? login?] :or {login? true}}]
+   {:keys [seed-backed-up? login? new-account?] :or {login? true}}]
   (let [normalized-address (utils.hex/normalize-hex address)
         account            {:public-key             pubkey
                             :installation-id        (or installation-id (get-in db [:accounts/new-installation-id]))
@@ -80,7 +82,10 @@
                             :keycard-instance-uid   keycard-instance-uid
                             :keycard-pairing        keycard-pairing
                             :keycard-paired-on      keycard-paired-on
-                            :settings               (constants/default-account-settings)}]
+                            :settings               (constants/default-account-settings)
+                            :syncing-on-mobile-network? false
+                            :remember-syncing-choice? false
+                            :new-account?           new-account?}]
     (log/debug "account-created")
     (when-not (string/blank? pubkey)
       (fx/merge cofx
@@ -102,12 +107,18 @@
   [{db :db} input-key text]
   {:db (update db :accounts/create merge {input-key text :error nil})})
 
-(defn account-set-name [{{:accounts/keys [create] :as db} :db :as cofx}]
+(defn account-set-name [{{:accounts/keys [create] :as db} :db now :now :as cofx}]
   (fx/merge cofx
-            {:db                                  (assoc db :accounts/create {:show-welcome? true})
+            {:db                                              db
              :notifications/request-notifications-permissions nil
-             :dispatch                            [:navigate-to :home]}
-            (accounts.update/account-update {:name (:name create)} {})))
+             :dispatch-n                                      [[:navigate-to :home]
+                                                               (when-not platform/desktop?
+                                                                 [:navigate-to :welcome])]}
+            ;; We set last updated as we are actually changing a field,
+            ;; unlike on recovery where the name is not set
+            (accounts.update/account-update {:last-updated now
+                                             :name         (:name create)} {})
+            (mobile-network/on-network-status-change)))
 
 (fx/defn next-step
   [{:keys [db] :as cofx} step password password-confirm]

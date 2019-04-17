@@ -2,6 +2,7 @@ import pytest
 from tests import marks, common_password, get_current_time, unique_password
 from tests.base_test_case import SingleDeviceTestCase
 from views.sign_in_view import SignInView
+from tests.users import basic_user
 
 
 @marks.all
@@ -11,6 +12,7 @@ class TestCreateAccount(SingleDeviceTestCase):
     @marks.testrail_id(5300)
     @marks.critical
     @marks.battery_consumption
+    @marks.skip
     def test_create_account(self):
         sign_in = SignInView(self.driver, skip_popups=False)
         sign_in.accept_agreements()
@@ -47,18 +49,31 @@ class TestCreateAccount(SingleDeviceTestCase):
     @marks.high
     def test_home_view(self):
         sign_in = SignInView(self.driver)
-        home = sign_in.create_user()
-        if not home.welcome_image.is_element_displayed():
+        sign_in.accept_agreements()
+        sign_in.create_account_button.click()
+        sign_in.password_input.set_value(common_password)
+        sign_in.next_button.click()
+        sign_in.confirm_password_input.set_value(common_password)
+        sign_in.next_button.click()
+
+        sign_in.element_by_text_part('Display name').wait_for_element(30)
+        sign_in.name_input.send_keys('user_%s' % get_current_time())
+        sign_in.next_button.click()
+
+        welcome_screen = sign_in.get_home_view()
+
+        if not welcome_screen.welcome_image.is_element_displayed():
             self.errors.append('Welcome image is not shown')
         for text in ['Welcome to Status',
-                     'Tap the plus (+) button to get started']:
-            if not home.element_by_text(text).is_element_displayed():
+                     'Here you can chat with people in a secure private chat, browse and interact with DApps.']:
+            if not welcome_screen.element_by_text(text).is_element_displayed():
                 self.errors.append("'%s' text is not shown" % text)
-        home.profile_button.click()
-        home.home_button.click()
-        text = 'Your Home screen will house your recent chats and DApp history. Tap the plus (+) button to get started.'
-        if not home.element_by_text(text).is_element_displayed():
+
+        welcome_screen.get_started_button.click()
+        text = 'There are no recent chats here yet. \nUse the (+) button to discover people \nto chat with'
+        if not welcome_screen.element_by_text(text).is_element_displayed():
             self.errors.append("'%s' text is not shown" % text)
+
         self.verify_no_errors()
 
     @marks.testrail_id(5460)
@@ -90,3 +105,10 @@ class TestCreateAccount(SingleDeviceTestCase):
         sign_in = SignInView(self.driver)
         sign_in.create_user(password=unique_password)
         sign_in.check_no_values_in_logcat(password=unique_password)
+
+    @marks.testrail_id(5718)
+    @marks.medium
+    def test_special_characters_in_password_when_creating_new_account(self):
+        sign_in = SignInView(self.driver)
+        sign_in.create_user(password=basic_user['special_chars_password'])
+        sign_in.relogin(password=basic_user['special_chars_password'])

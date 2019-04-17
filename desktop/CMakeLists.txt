@@ -11,7 +11,6 @@ cmake_minimum_required(VERSION 2.8.11)
 set(APP_NAME Status)
 set(JS_APP_NAME StatusIm)
 set(REACT_BUILD_STATIC_LIB ON)
-project(${APP_NAME} CXX)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUNICODE -std=c++11")
 if(STATUS_NO_LOGGING)
@@ -20,13 +19,15 @@ endif()
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DUNICODE -std=c11")
 set(CMAKE_INSTALL_PREFIX bin)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_PREFIX}" CACHE PATH "Where to place compiled executables.")
-set(${APP_NAME}_BINARY_DIR ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
 
 set(CMAKE_OSX_DEPLOYMENT_TARGET "10.9")
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMakeModules/")
 
-set(USED_QT_MODULES Core Qml Quick WebSockets Svg)
+project(${APP_NAME} C CXX)
+set(${APP_NAME}_BINARY_DIR ${CMAKE_RUNTIME_OUTPUT_DIRECTORY})
+
+set(USED_QT_MODULES Core Concurrent Qml Quick WebSockets Svg)
 include(QtConfiguration)
 
 set(ICON_PNG_RESOURCE_PATH "${CMAKE_SOURCE_DIR}/../deployment/status-icon.png")

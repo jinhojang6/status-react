@@ -70,6 +70,11 @@
                   :config {:NetworkId      (ethereum/chain-keyword->chain-id :testnet)
                            :DataDir        "/ethereum/testnet"
                            :LightEthConfig {:Enabled true}}}
+   "testnet_ulc" {:id     "testnet_ulc",
+                  :name   "Ropsten ULC",
+                  :config {:NetworkId      (ethereum/chain-keyword->chain-id :testnet)
+                           :DataDir        "/ethereum/testnet_ulc"
+                           :LightEthConfig {:Enabled true :ULC true}}}
    "testnet_rpc" {:id     "testnet_rpc",
                   :name   "Ropsten with upstream RPC",
                   :config {:NetworkId      (ethereum/chain-keyword->chain-id :testnet)
@@ -202,6 +207,9 @@
 
 (def ^:const web3-send-transaction "eth_sendTransaction")
 (def ^:const web3-personal-sign "personal_sign")
+(def ^:const web3-sign-typed-data "eth_signTypedData")
+(def ^:const web3-sign-typed-data-v3 "eth_signTypedData_v3")
+
 (def ^:const web3-get-logs "eth_getLogs")
 (def ^:const web3-transaction-receipt "eth_getTransactionReceipt")
 (def ^:const web3-new-filter "eth_newFilter")
@@ -209,6 +217,19 @@
 (def ^:const web3-new-block-filter "eth_newBlockFilter")
 (def ^:const web3-uninstall-filter "eth_uninstallFilter")
 (def ^:const web3-get-filter-changes "eth_getFilterChanges")
+
+(def ^:const web3-shh-post "shh_post")
+(def ^:const web3-shh-new-identity "shh_newIdentity")
+(def ^:const web3-shh-has-identity "shh_hasIdentity")
+(def ^:const web3-shh-new-group "shh_newGroup")
+(def ^:const web3-shh-add-to-group "shh_addToGroup")
+(def ^:const web3-shh-new-filter "shh_newFilter")
+(def ^:const web3-shh-uninstall-filter "shh_uninstallFilter")
+(def ^:const web3-shh-get-filter-changes "shh_getFilterChanges")
+(def ^:const web3-shh-get-messages "shh_getMessages")
+
+(defn web3-sign-message? [method]
+  (#{web3-sign-typed-data web3-sign-typed-data-v3 web3-personal-sign} method))
 
 (def ^:const status-create-address "status_createaddress")
 
@@ -223,6 +244,8 @@
 (def regx-bold #"\*[^*]+\*")
 (def regx-italic #"~[^~]+~")
 (def regx-backquote #"`[^`]+`")
+(def regx-universal-link #"((^https?://get.status.im/)|(^status-im://))[\x00-\x7F]+$")
+(def regx-deep-link #"(^status-im://)[\x00-\x7F]+$")
 
 (def ^:const lines-collapse-threshold 20)
 (def ^:const chars-collapse-threshold 600)
@@ -243,6 +266,5 @@
 (def ^:const scan-qr-code-callback "scan-qr-code-callback")
 
 ;;ipfs
-(def ^:const ipfs-add-url "https://ipfs.infura.io:5001/api/v0/add")
-(def ^:const ipfs-add-param-name "extension.event.edn")
-(def ^:const ipfs-cat-url "https://ipfs.infura.io/ipfs/")
+(def ^:const ipfs-proto-code "e3")
+(def ^:const swarm-proto-code "e4")

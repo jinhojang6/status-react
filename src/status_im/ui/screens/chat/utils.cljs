@@ -9,16 +9,26 @@
             [status-im.ui.components.colors :as colors]
             [status-im.utils.http :as http]))
 
-(defn format-author [from username]
-  (str (when username (str username " • "))
-       (gfycat/generate-gfy from))) ; TODO: We defensively generate the name for now, to be revisited when new protocol is defined
+(defn format-author [from username style]
+  ;; TODO: We defensively generate the name for now, to be revisited when new protocol is defined
+  [react/nested-text {:style (style false)
+                      :number-of-lines 1
+                      :ellipsize-mode  :tail}
+   (when username
+     [{:style (style true)
+       :number-of-lines 1
+       :ellipsize-mode  :tail}
+      (str username " • ")])
+   (gfycat/generate-gfy from)])
 
-(defn format-reply-author [from username current-public-key]
-  (or (and (= from current-public-key) (i18n/label :t/You))
-      (format-author from username)))
+(defn format-reply-author [from username current-public-key style]
+  (or (and (= from current-public-key)
+           [react/text {:style (style true)}
+            (i18n/label :t/You)])
+      (format-author from username style)))
 
 (def ^:private styling->prop
-  {:bold      {:style {:font-weight :bold}}
+  {:bold      {:style {:font-weight "700"}}
    :italic    {:style {:font-style  :italic}}
    :backquote {:style {:background-color colors/black
                        :color            colors/green}}})
@@ -37,7 +47,7 @@
                                                  colors/blue
                                                  (if outgoing colors/white colors/blue))
                          :text-decoration-line :underline}
-              :on-press #(re-frame/dispatch [:chat.ui/start-public-chat (subs text 1)])})})
+              :on-press #(re-frame/dispatch [:chat.ui/start-public-chat (subs text 1) {:navigation-reset? true}])})})
 
 (defn- lookup-props [text-chunk message kind]
   (let [prop    (get styling->prop kind)
@@ -45,12 +55,12 @@
     (if prop-fn (prop-fn text-chunk message) prop)))
 
 (defn render-chunks [render-recipe message]
-  (map-indexed (fn [idx [text-chunk kind]]
-                 (if (= :text kind)
-                   text-chunk
-                   [react/text (into {:key idx} (lookup-props text-chunk message kind))
-                    text-chunk]))
-               render-recipe))
+  (vec (map-indexed (fn [idx [text-chunk kind]]
+                      (if (= :text kind)
+                        text-chunk
+                        [(into {:key idx} (lookup-props text-chunk message kind))
+                         text-chunk]))
+                    render-recipe)))
 
 (defn render-chunks-desktop [limit render-recipe message]
   "This fn is only needed as a temporary hack
