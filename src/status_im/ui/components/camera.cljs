@@ -2,23 +2,28 @@
   (:require [goog.object :as object]
             [reagent.core :as reagent]
             [clojure.walk :as walk]
-            [status-im.react-native.js-dependencies :as js-dependecies]))
+            [status-im.react-native.js-dependencies :as js-dependencies]
+            [status-im.utils.platform :as platform]))
 
-(def default-camera (.-default js-dependecies/camera))
+(def default-camera
+  (-> js-dependencies/camera
+      (object/get "RNCamera")))
 
-(defn constants [t]
-  (-> default-camera
-      (object/get "constants")
-      (object/get t)
-      (js->clj)
-      (walk/keywordize-keys)))
+(defn- constants [t]
+  (if platform/desktop?
+    nil
+    (-> default-camera
+        (object/get "Constants")
+        (object/get t)
+        (js->clj)
+        (walk/keywordize-keys))))
 
-(def aspects (constants "Aspect"))
+(def aspects (constants "Orientation"))
 (def capture-targets (constants "CaptureTarget"))
-(def torch-modes (constants "TorchMode"))
+(def torch-modes (constants "FlashMode"))
 
 (defn set-torch [state]
-  (set! (.-torchMode default-camera) (get torch-modes state)))
+  (set! (.-flashMode default-camera) (get torch-modes state)))
 
 (defn request-access-ios [then else]
   (-> (.checkVideoAuthorizationStatus default-camera)

@@ -4,17 +4,10 @@
             [status-im.react-native.js-dependencies :as rn]
             [status-im.utils.platform :as platform]
             [status-im.utils.security :as security]
-            [status-im.native-module.core :as status]))
-
-(def key-bytes 64)
-(def username "status-im.encryptionkey")
-(def android-keystore-min-version 23)
-
-(defn- bytes->js-array [b]
-  (.from js/Array b))
-
-(defn- string->js-array [s]
-  (.parse js/JSON (.-password s)))
+            [status-im.native-module.core :as status]
+            [status-im.utils.fx :as fx]
+            [goog.object :as object]
+            [clojure.string :as string]))
 
 (defn- check-conditions [callback & checks]
   (if (= (count checks) 0)
@@ -37,7 +30,9 @@
 ;; to an address (`server`) property.
 
 (defn enum-val [enum-name value-name]
-  (get-in (js->clj rn/keychain) [enum-name value-name]))
+  (-> rn/keychain
+      (object/get enum-name)
+      (object/get value-name)))
 
 ;; We need a more strict access mode for keychain entries that save user password.
 ;; iOS
@@ -57,9 +52,9 @@
   ;; > you might choose kSecAttrAccessibleWhenPasscodeSetThisDeviceOnly.
   ;; That is exactly what we use there.
   ;; Note that the password won't be stored if the device isn't locked by a passcode.
-  {:accessible (enum-val "ACCESSIBLE" "WHEN_PASSCODE_SET_THIS_DEVICE_ONLY")})
+  #js {:accessible (enum-val "ACCESSIBLE" "WHEN_PASSCODE_SET_THIS_DEVICE_ONLY")})
 
-(def keychain-secure-hardware
+(def ^:const keychain-secure-hardware
   ;; (Android) Requires storing the encryption key for the entry in secure hardware
   ;; or StrongBox (see https://developer.android.com/training/articles/keystore#ExtractionPrevention)
   "SECURE_HARDWARE")
@@ -79,134 +74,85 @@
 (defn- device-encrypted? [callback]
   (-> (.canImplyAuthentication
        rn/keychain
-       (clj->js
-        {:authenticationType
-         (enum-val "ACCESS_CONTROL" "BIOMETRY_ANY_OR_DEVICE_PASSCODE")}))
+       #js {:authenticationType (enum-val "ACCESS_CONTROL" "BIOMETRY_ANY_OR_DEVICE_PASSCODE")})
       (.then callback)))
 
-;; Stores the password for the address to the Keychain
-(defn save-user-password [address password callback]
-  (-> (.setInternetCredentials rn/keychain address address password keychain-secure-hardware (clj->js keychain-restricted-availability))
+(defn- whisper-key-name [address]
+  (str address "-whisper"))
+
+(defn can-save-user-password? [callback]
+  (log/debug "[keychain] can-save-user-password?")
+  (cond
+    platform/ios?
+    (check-conditions callback device-encrypted?)
+
+    platform/android?
+    (check-conditions callback secure-hardware-available? device-not-rooted?)
+
+    :else
+    (callback false)))
+
+(defn save-credentials
+  "Stores the credentials for the address to the Keychain"
+  [server username password callback]
+  (log/debug "[keychain] save-credentials")
+  (-> (.setInternetCredentials rn/keychain (string/lower-case server) username password
+                               keychain-secure-hardware keychain-restricted-availability)
       (.then callback)))
 
-(defn handle-callback [callback result]
-  (if result
-    (callback (security/mask-data (.-password result)))
-    (callback nil)))
-
-;; Gets the password for a specified address from the Keychain
-(defn get-user-password [address callback]
-  (if (or platform/ios? platform/android?)
-    (-> (.getInternetCredentials rn/keychain address)
-        (.then (partial handle-callback callback)))
+(defn get-credentials
+  "Gets the credentials for a specified server from the Keychain"
+  [server callback]
+  (log/debug "[keychain] get-credentials")
+  (if platform/mobile?
+    (-> (.getInternetCredentials rn/keychain (string/lower-case server))
+        (.then callback))
     (callback))) ;; no-op for Desktop
 
-;; Clears the password for a specified address from the Keychain
-;; (example of usage is logout or signing in w/o "save-password")
-(defn clear-user-password [address callback]
-  (if (or platform/ios? platform/android?)
-    (-> (.resetInternetCredentials rn/keychain address)
-        (.then callback))
-    (callback true))) ;; no-op for Desktop
+(def ^:const auth-method-password "password")
+(def ^:const auth-method-biometric "biometric")
+(def ^:const auth-method-biometric-prepare "biometric-prepare")
+(def ^:const auth-method-none "none")
 
-;; Resolves to `false` if the device doesn't have neither a passcode nor a biometry auth.
-(defn can-save-user-password? [callback]
-  (cond
-    platform/ios? (device-encrypted? callback)
+(re-frame/reg-fx
+ :keychain/get-auth-method
+ (fn [[key-uid callback]]
+   (can-save-user-password?
+    (fn [can-save?]
+      (if can-save?
+        (get-credentials (str key-uid "-auth")
+                         #(callback (if %
+                                      (.-password %)
+                                      auth-method-none)))
+        (callback nil))))))
 
-    platform/android?  (check-conditions
-                        callback
-                        secure-hardware-available?
-                        device-not-rooted?)
+(re-frame/reg-fx
+ :keychain/get-user-password
+ (fn [[key-uid callback]]
+   (get-credentials key-uid #(if % (callback (security/mask-data (.-password %))) (callback nil)))))
 
-    :else (callback false)))
-
-;; ********************************************************************************
-;; Storing / Retrieving the realm encryption key to/from the Keychain
-;; ********************************************************************************
-
-
-;; Smoke test key to make sure is ok, we noticed some non-random keys on
-;; some IOS devices. We check naively that there are no more than key-bytes/2
-;; identical characters.
-(defn validate
-  [encryption-key]
-  (cond
-    (or (not encryption-key)
-        (not= (.-length encryption-key) key-bytes))
-    (.reject js/Promise {:error :invalid-key
-                         :key    encryption-key})
-
-    (>= (/ key-bytes 2)
-        (count (keys (group-by identity encryption-key))))
-    (.reject js/Promise {:error :weak-key
-                         :key   encryption-key})
-
-    :else encryption-key))
-
-(defn store [encryption-key]
-  (log/debug "storing encryption key")
-  (-> (.setGenericPassword
-       rn/keychain
-       username
-       (.stringify js/JSON encryption-key))
-      (.then (constantly encryption-key))))
-
-(defn create []
-  (log/debug "no key exists, creating...")
-  (.. (rn/secure-random key-bytes)
-      (then bytes->js-array)))
-
-(defn handle-not-found []
-  (.. (create)
-      (then validate)
-      (then store)))
-
-(def handle-found
-  (comp validate
-        string->js-array))
-
-(defonce generic-password (atom nil))
-
-(defn get-encryption-key []
-  (log/debug "PERF" "initializing realm encryption key..." (.now js/Date))
-  (if @generic-password
-    (js/Promise.
-     (fn [on-success _]
-       (on-success (security/unmask @generic-password))))
-    (.. (.getGenericPassword rn/keychain)
-        (then
-         (fn [res]
-           (if res
-             (let [handled-res (handle-found res)]
-               (reset! generic-password
-                       (security/->MaskedData handled-res))
-               handled-res)
-             (handle-not-found)))))))
-
-(defn safe-get-encryption-key
-  "Return encryption key or empty string in case invalid/empty"
-  []
-  (log/debug "initializing realm encryption key...")
-  (.. (get-encryption-key)
-      (catch (fn [{:keys [_ key]}]
-               (log/warn "key is invalid, continuing")
-               (or key "")))))
-
-(defn reset []
-  (log/debug "resetting key...")
-  (.resetGenericPassword rn/keychain))
-
-(defn set-username []
-  (when platform/desktop? (.setUsername rn/keychain username)))
-
-;;;; Effects
+(re-frame/reg-fx
+ :keychain/get-hardwallet-keys
+ (fn [[key-uid callback]]
+   (get-credentials
+    key-uid
+    (fn [encryption-key-data]
+      (if encryption-key-data
+        (get-credentials
+         (whisper-key-name key-uid)
+         (fn [whisper-key-data]
+           (if whisper-key-data
+             (callback [(.-password encryption-key-data)
+                        (.-password whisper-key-data)])
+             (callback nil))))
+        (callback nil))))))
 
 (re-frame/reg-fx
  :keychain/save-user-password
- (fn [[address password]]
-   (save-user-password
-    address
+ (fn [[key-uid password]]
+   (save-credentials
+    key-uid
+    key-uid
     (security/safe-unmask-data password)
     #(when-not %
        (log/error
@@ -216,19 +162,75 @@
              "but you will have to login again next time you launch it."))))))
 
 (re-frame/reg-fx
- :keychain/get-user-password
- (fn [[address callback]]
-   (get-user-password address callback)))
+ :keychain/save-auth-method
+ (fn [[key-uid method]]
+   (log/debug "[keychain] :keychain/save-auth-method"
+              "method" method)
+   (save-credentials
+    (str key-uid "-auth")
+    key-uid
+    method
+    #(when-not %
+       (log/error
+        (str "Error while saving auth method."
+             " "
+             "The app will continue to work normally, "
+             "but you will have to login again next time you launch it."))))))
+
+(re-frame/reg-fx
+ :keychain/save-hardwallet-keys
+ (fn [[key-uid encryption-public-key whisper-private-key]]
+   (save-credentials
+    key-uid
+    key-uid
+    encryption-public-key
+    #(when-not %
+       (log/error
+        (str "Error while saving encryption-public-key"))))
+   (save-credentials
+    (whisper-key-name key-uid)
+    key-uid
+    whisper-private-key
+    #(when-not %
+       (log/error
+        (str "Error while saving whisper-private-key"))))))
 
 (re-frame/reg-fx
  :keychain/clear-user-password
- (fn [address]
-   (clear-user-password
-    address
-    #(when-not %
-       (log/error (str "Error while clearing saved password."))))))
+ (fn [key-uid]
+   (when platform/mobile?
+     (-> (.resetInternetCredentials rn/keychain (string/lower-case key-uid))
+         (.then #(when-not % (log/error (str "Error while clearing saved password."))))))))
 
-(re-frame/reg-fx
- :keychain/can-save-user-password?
- (fn [_]
-   (can-save-user-password? #(re-frame/dispatch [:keychain.callback/can-save-user-password?-success %]))))
+(fx/defn get-auth-method
+  [_ key-uid]
+  {:keychain/get-auth-method
+   [key-uid #(re-frame/dispatch [:multiaccounts.login/get-auth-method-success % key-uid])]})
+
+(fx/defn get-user-password
+  [_ key-uid]
+  {:keychain/get-user-password
+   [key-uid
+    #(re-frame/dispatch
+      [:multiaccounts.login.callback/get-user-password-success % key-uid])]})
+
+(fx/defn get-hardwallet-keys
+  [_ key-uid]
+  {:keychain/get-hardwallet-keys
+   [key-uid
+    #(re-frame/dispatch
+      [:multiaccounts.login.callback/get-hardwallet-keys-success key-uid %])]})
+
+(fx/defn save-user-password
+  [_ key-uid password]
+  {:keychain/save-user-password [key-uid password]})
+
+(fx/defn save-hardwallet-keys
+  [_ key-uid encryption-public-key whisper-private-key]
+  {:keychain/save-hardwallet-keys [key-uid
+                                   encryption-public-key
+                                   whisper-private-key]})
+(fx/defn save-auth-method
+  [{:keys [db]} key-uid method]
+  {:db                        (assoc db :auth-method method)
+   :keychain/save-auth-method [key-uid method]})

@@ -1,21 +1,22 @@
 (ns status-im.utils.universal-links.core
   (:require [cljs.spec.alpha :as spec]
+            [clojure.string :as string]
             [goog.string :as gstring]
-            [goog.string.format]
             [re-frame.core :as re-frame]
-            [status-im.accounts.db :as accounts.db]
+            [status-im.multiaccounts.model :as multiaccounts.model]
             [status-im.chat.models :as chat]
-            [status-im.extensions.registry :as extensions.registry]
+            [status-im.constants :as constants]
+            [status-im.ethereum.ens :as ens]
+            [status-im.ethereum.core :as ethereum]
+            [status-im.pairing.core :as pairing]
+            [status-im.utils.security :as security]
             [status-im.ui.components.list-selection :as list-selection]
             [status-im.ui.components.react :as react]
             [status-im.ui.screens.add-new.new-chat.db :as new-chat.db]
-            [status-im.ui.screens.desktop.main.chat.events :as desktop.events]
             [status-im.ui.screens.navigation :as navigation]
-            [status-im.utils.config :as config]
             [status-im.utils.fx :as fx]
             [taoensso.timbre :as log]
-            [status-im.utils.platform :as platform]
-            [status-im.constants :as constants]))
+            [status-im.wallet.choose-recipient.core :as choose-recipient]))
 
 ;; TODO(yenda) investigate why `handle-universal-link` event is
 ;; dispatched 7 times for the same link
@@ -23,7 +24,6 @@
 (def public-chat-regex #".*/chat/public/(.*)$")
 (def profile-regex #".*/user/(.*)$")
 (def browse-regex #".*/browse/(.*)$")
-(def extension-regex #".*/extension/(.*)$")
 
 ;; domains should be without the trailing slash
 (def domains {:external "https://get.status.im"
@@ -43,6 +43,9 @@
            (re-matches regex)
            peek))
 
+(defn is-request-url? [url]
+  (string/starts-with? url "ethereum:"))
+
 (defn universal-link? [url]
   (boolean
    (re-matches constants/regx-universal-link url)))
@@ -54,30 +57,50 @@
 (defn open! [url]
   (log/info "universal-links:  opening " url)
   (if-let [dapp-url (match-url url browse-regex)]
-    (list-selection/browse-dapp dapp-url)
+    (when (security/safe-link? url)
+      (list-selection/browse-dapp dapp-url))
     ;; We need to dispatch here, we can't openURL directly
     ;; as it is opened in safari on iOS
     (re-frame/dispatch [:handle-universal-link url])))
 
 (fx/defn handle-browse [cofx url]
   (log/info "universal-links: handling browse" url)
-  {:browser/show-browser-selection url})
+  (when (security/safe-link? url)
+    {:browser/show-browser-selection url}))
 
 (fx/defn handle-public-chat [cofx public-chat]
   (log/info "universal-links: handling public chat" public-chat)
   (chat/start-public-chat cofx public-chat {}))
 
-(fx/defn handle-view-profile [{:keys [db] :as cofx} public-key]
-  (log/info "universal-links: handling view profile" public-key)
-  (if (new-chat.db/own-public-key? db public-key)
+(fx/defn handle-view-profile
+  [{:keys [db] :as cofx} {:keys [public-key ens-name]}]
+  (log/info "universal-links: handling view profile" (or ens-name public-key))
+  (cond
+    (and public-key (new-chat.db/own-public-key? db public-key))
     (navigation/navigate-to-cofx cofx :my-profile nil)
-    (if platform/desktop?
-      (desktop.events/show-profile-desktop public-key cofx)
-      (navigation/navigate-to-cofx (assoc-in cofx [:db :contacts/identity] public-key) :profile nil))))
 
-(fx/defn handle-extension [cofx url]
-  (log/info "universal-links: handling url profile" url)
-  (extensions.registry/load cofx url false))
+    public-key
+    (navigation/navigate-to-cofx (assoc-in cofx [:db :contacts/identity] public-key) :profile nil)
+
+    ens-name
+    (let [chain (ethereum/chain-keyword db)]
+      {:resolve-public-key {:chain            chain
+                            :contact-identity ens-name
+                            :cb               (fn [pub-key]
+                                                (cond
+                                                  (and pub-key (new-chat.db/own-public-key? db pub-key))
+                                                  (re-frame/dispatch [:navigate-to :my-profile])
+
+                                                  pub-key
+                                                  (re-frame/dispatch [:chat.ui/show-profile pub-key])
+
+                                                  :else
+                                                  (log/info "universal-link: no pub-key for ens-name " ens-name)))}})))
+
+(fx/defn handle-eip681 [cofx url]
+  (fx/merge cofx
+            (choose-recipient/resolve-ens-addresses url)
+            (navigation/navigate-to-cofx  :wallet nil)))
 
 (defn handle-not-found [full-url]
   (log/info "universal-links: no handler for " full-url))
@@ -97,13 +120,17 @@
     (handle-public-chat cofx (match-url url public-chat-regex))
 
     (spec/valid? :global/public-key (match-url url profile-regex))
-    (handle-view-profile cofx (match-url url profile-regex))
+    (handle-view-profile cofx {:public-key (match-url url profile-regex)})
+
+    (or (ens/valid-eth-name-prefix? (match-url url profile-regex))
+        (ens/is-valid-eth-name? (match-url url profile-regex)))
+    (handle-view-profile cofx {:ens-name (match-url url profile-regex)})
 
     (match-url url browse-regex)
     (handle-browse cofx (match-url url browse-regex))
 
-    (and config/extensions-enabled? (match-url url extension-regex))
-    (handle-extension cofx url)
+    (is-request-url? url)
+    (handle-eip681 cofx url)
 
     :else (handle-not-found url)))
 
@@ -117,7 +144,7 @@
   "Store url in the database if the user is not logged in, to be processed
   on login, otherwise just handle it"
   [cofx url]
-  (if (accounts.db/logged-in? cofx)
+  (if (multiaccounts.model/logged-in? cofx)
     (route-url cofx url)
     (store-url-for-later cofx url)))
 

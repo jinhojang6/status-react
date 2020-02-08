@@ -1,5 +1,4 @@
 (ns status-im.ui.components.toolbar.styles
-  (:require-macros [status-im.utils.styles :refer [defstyle defnstyle]])
   (:require [status-im.ui.components.colors :as colors]))
 
 (def toolbar-height 56)
@@ -14,8 +13,7 @@
 (def toolbar-title-container
   {:justify-content :center
    :align-items     :center
-   :flex-direction  :column
-   :margin-left     6})
+   :flex-direction  :column})
 
 (def toolbar-title-text
   {:typography :title-bold
@@ -40,7 +38,7 @@
 (def item-text
   {:color colors/blue})
 
-(defstyle item-text-action
+(def item-text-action
   {:color colors/blue})
 
 (def toolbar-text-action-disabled
@@ -58,7 +56,7 @@
   {:width           24
    :height          24
    :color           colors/blue
-   :container-style {:background-color (colors/alpha colors/blue 0.12)
+   :container-style {:background-color colors/blue-transparent-10
                      :border-radius    28
                      :display          :flex
                      :justify-content  :center

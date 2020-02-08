@@ -120,6 +120,9 @@ class BaseElement(object):
                     self.driver.swipe(500, 1000, 500, 500)
                 else:
                     self.driver.swipe(500, 500, 500, 1000)
+        else:
+            raise NoSuchElementException(
+                "Device %s: '%s' is not found on the screen" % (self.driver.number, self.name)) from None
 
     def is_element_present(self, sec=5):
         try:
@@ -154,17 +157,33 @@ class BaseElement(object):
     def image(self):
         return Image.open(BytesIO(base64.b64decode(self.find_element().screenshot_as_base64)))
 
+    def attribute_value(self, value):
+        attribute_value = self.find_element().get_attribute(value)
+        if attribute_value.lower() == 'true':
+            attribute_state = True
+        elif attribute_value.lower() == 'false':
+            attribute_state = False
+        else:
+            attribute_state = attribute_value
+        return attribute_state
+
     def is_element_image_equals_template(self, file_name: str = ''):
         if file_name:
             self.template = file_name
         return not ImageChops.difference(self.image, self.template).getbbox()
 
-    def swipe_element(self):
+    def swipe_left_on_element(self):
         element = self.find_element()
         location, size = element.location, element.size
         x, y = location['x'], location['y']
         width, height = size['width'], size['height']
         self.driver.swipe(start_x=x + width * 0.75, start_y=y + height / 2, end_x=x, end_y=y + height / 2)
+
+    def swipe_to_web_element(self):
+        element = self.find_element()
+        location = element.location
+        x, y = location['x'], location['y']
+        self.driver.swipe(start_x=x, start_y=y, end_x=x, end_y=400)
 
     def long_press_element(self):
         element = self.find_element()
@@ -250,7 +269,7 @@ class BaseButton(BaseElement):
         self.driver.info('Tap on %s' % self.name)
         return self.navigate()
 
-    def click_until_presence_of_element(self, desired_element, attempts=3):
+    def click_until_presence_of_element(self, desired_element, attempts=4):
         counter = 0
         while not desired_element.is_element_present(1) and counter <= attempts:
             try:
@@ -261,3 +280,14 @@ class BaseButton(BaseElement):
                 return self.navigate()
             except (NoSuchElementException, TimeoutException):
                 counter += 1
+
+    def click_until_absense_of_element(self, desired_element, attempts=3):
+        counter = 0
+        while desired_element.is_element_present(1) and counter <= attempts:
+            try:
+                self.driver.info('Tap on %s' % self.name)
+                self.find_element().click()
+                self.driver.info('Wait for %s' % desired_element.name)
+                counter += 1
+            except (NoSuchElementException, TimeoutException):
+                return self.navigate()

@@ -18,9 +18,9 @@
           actual       (model/upsert
                         {:random-id-generator   (constantly "some-id")
                          :db {:bootnodes/manage new-bootnode
-                              :network          "mainnet_rpc"
-                              :account/account  {}}})]
-      (is (= expected (get-in actual [:db :account/account :bootnodes])))))
+                              :networks/current-network "mainnet_rpc"
+                              :multiaccount {:not-empty "would throw an error if was empty"}}})]
+      (is (= expected (get-in actual [:db :multiaccount :custom-bootnodes])))))
   (testing "adding an existing bootnode"
     (let [new-bootnode {:id   {:value "a"}
                         :name {:value "new-name"}
@@ -32,14 +32,14 @@
           actual       (model/upsert
                         {:random-id-generator   (constantly "some-id")
                          :db {:bootnodes/manage new-bootnode
-                              :network          "mainnet_rpc"
-                              :account/account  {:bootnodes
-                                                 {"mainnet_rpc"
-                                                  {"a" {:name    "name"
-                                                        :address "url"
-                                                        :chain   "mainnet_rpc"
-                                                        :id      "a"}}}}}})]
-      (is (= expected (get-in actual [:db :account/account :bootnodes]))))))
+                              :networks/current-network "mainnet_rpc"
+                              :multiaccount  {:custom-bootnodes
+                                              {"mainnet_rpc"
+                                               {"a" {:name    "name"
+                                                     :address "url"
+                                                     :chain   "mainnet_rpc"
+                                                     :id      "a"}}}}}})]
+      (is (= expected (get-in actual [:db :multiaccount :custom-bootnodes]))))))
 
 (deftest set-input-bootnode
   (testing "it validates names"
@@ -69,9 +69,9 @@
            (model/set-bootnodes-from-qr {:db {}} (str valid-bootnode-address "   "))))))
 
 (deftest edit-bootnode
-  (let [db {:network "mainnet_rpc"
-            :account/account
-            {:bootnodes
+  (let [db {:networks/current-network "mainnet_rpc"
+            :multiaccount
+            {:custom-bootnodes
              {"mainnet_rpc"
               {"a" {:id      "a"
                     :name    "name"
@@ -120,56 +120,55 @@
 
 (deftest fetch-bootnode
   (testing "it fetches the bootnode from the db"
-    (let [cofx {:db {:network "mainnet_rpc"
-                     :account/account {:bootnodes {"mainnet_rpc"
-                                                   {"a" {:id      "a"
-                                                         :name    "name"
-                                                         :address "enode://old-id:old-password@url:port"}}}}}}]
+    (let [cofx {:db {:networks/current-network "mainnet_rpc"
+                     :multiaccount {:custom-bootnodes
+                                    {"mainnet_rpc"
+                                     {"a" {:id      "a"
+                                           :name    "name"
+                                           :address "enode://old-id:old-password@url:port"}}}}}}]
       (is (model/fetch cofx "a")))))
 
 (deftest custom-bootnodes-in-use?
   (testing "is on the same network"
     (testing "it returns false when not enabled"
-      (is (not (model/custom-bootnodes-in-use? {:db {:network "mainnet_rpc"}}))))
+      (is (not (model/custom-bootnodes-in-use? {:db {:networks/current-network "mainnet_rpc"}}))))
     (testing "it returns true when enabled"
       (is (model/custom-bootnodes-in-use?
-           {:db {:network "mainnet_rpc"
-                 :account/account {:settings
-                                   {:bootnodes
-                                    {"mainnet_rpc" true}}}}}))))
+           {:db {:networks/current-network "mainnet_rpc"
+                 :multiaccount {:custom-bootnodes-enabled?
+                                {"mainnet_rpc" true}}}}))))
   (testing "is on a different network"
     (testing "it returns false when not enabled"
-      (is (not (model/custom-bootnodes-in-use? {:db {:network "testnet_rpc"}}))))
+      (is (not (model/custom-bootnodes-in-use? {:db {:networks/current-network "testnet_rpc"}}))))
     (testing "it returns true when enabled"
       (is (not (model/custom-bootnodes-in-use?
-                {:db {:network "testnet_rpc"
-                      :account/account {:settings
-                                        {:bootnodes
-                                         {"mainnnet_rpc" true}}}}}))))))
+                {:db {:networks/current-network "testnet_rpc"
+                      :multiaccount {:custom-bootnodes-enabled?
+                                     {"mainnnet_rpc" true}}}}))))))
 
 (deftest delete-bootnode
   (testing "non existing bootnode"
-    (let [cofx {:db {:network "mainnet_rpc"
-                     :account/account {:bootnodes {"mainnet_rpc"
-                                                   {"a" {:id      "a"
-                                                         :name    "name"
-                                                         :address "enode://old-id:old-password@url:port"}}}
-                                       :settings {:bootnodes
-                                                  {"mainnnet_rpc" true}}}}}
+    (let [cofx {:db {:networks/current-network "mainnet_rpc"
+                     :multiaccount {:custom-bootnodes
+                                    {"mainnet_rpc"
+                                     {"a" {:id      "a"
+                                           :name    "name"
+                                           :address "enode://old-id:old-password@url:port"}}}
+                                    :custom-bootnodes-enabled?
+                                    {"mainnnet_rpc" true}}}}
           actual (model/delete cofx "b")]
       (testing "it does not removes the bootnode"
         (is (model/fetch actual "a")))))
   (testing "existing bootnode"
-    (let [cofx {:db {:network "mainnet_rpc"
-                     :account/account {:bootnodes {"mainnet_rpc"
-                                                   {"a" {:id      "a"
-                                                         :name    "name"
-                                                         :address "enode://old-id:old-password@url:port"}}}
-                                       :settings {:bootnodes
-                                                  {"mainnnet_rpc" true}}}}}
+    (let [cofx {:db {:networks/current-network "mainnet_rpc"
+                     :multiaccount {:custom-bootnodes
+                                    {"mainnet_rpc"
+                                     {"a" {:id      "a"
+                                           :name    "name"
+                                           :address "enode://old-id:old-password@url:port"}}}
+                                    :custom-bootnodes-enabled?
+                                    {"mainnnet_rpc" true}}}}
           actual (model/delete cofx "a")]
 
       (testing "it removes the bootnode"
-        (is (not (model/fetch actual "a"))))
-      (testing "it updates the db"
-        (is (= 1 (count (:data-store/base-tx actual))))))))
+        (is (not (model/fetch actual "a")))))))

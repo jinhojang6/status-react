@@ -1,18 +1,16 @@
 (ns status-im.utils.navigation
   (:require [status-im.react-native.js-dependencies :as js-dependencies]
-            [status-im.utils.platform :as platform]))
+            [status-im.utils.platform :as platform]
+            [goog.object :as gobj]))
 
 (def navigation-actions
-  (when (not platform/desktop?)
-    (.-NavigationActions js-dependencies/react-navigation)))
+  (.-NavigationActions js-dependencies/react-navigation))
 
 (def navigation-events
-  (when (not platform/desktop?)
-    (.-NavigationEvents js-dependencies/react-navigation)))
+  (.-NavigationEvents js-dependencies/react-navigation))
 
 (def stack-actions
-  (when (not platform/desktop?)
-    (.-StackActions js-dependencies/react-navigation)))
+  (.-StackActions js-dependencies/react-navigation))
 
 (def navigator-ref (atom nil))
 
@@ -20,16 +18,16 @@
   (reset! navigator-ref ref))
 
 (defn can-be-called? []
-  (and @navigator-ref
-       (not platform/desktop?)))
+  @navigator-ref)
 
-(defn navigate-to [route]
+(defn navigate-to [route params]
   (when (can-be-called?)
     (.dispatch
      @navigator-ref
      (.navigate
       navigation-actions
-      #js {:routeName (name route)}))))
+      #js {:routeName (name route)
+           :params    (clj->js params)}))))
 
 (defn- navigate [params]
   (when (can-be-called?)
@@ -49,3 +47,8 @@
     (.dispatch
      @navigator-ref
      (.back navigation-actions))))
+
+(defonce TwoPaneNavigator (gobj/get js-dependencies/react-native-navigation-twopane #js ["createTwoPaneNavigator"]))
+
+(defn twopane-navigator [routeConfigs stackNavigatorConfig]
+  (TwoPaneNavigator (clj->js routeConfigs) (clj->js stackNavigatorConfig)))

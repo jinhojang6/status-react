@@ -1,7 +1,7 @@
 from tests import common_password
 from views.base_element import BaseText, BaseElement
 from views.base_element import BaseButton, BaseEditBox
-from views.base_view import BaseView, OkButton, ProgressBar
+from views.base_view import BaseView, OkButton
 
 
 class FirstRecipient(BaseButton):
@@ -13,13 +13,13 @@ class FirstRecipient(BaseButton):
 class CancelButton(BaseButton):
     def __init__(self, driver):
         super(CancelButton, self).__init__(driver)
-        self.locator = self.Locator.accessibility_id('cancel-button')
+        self.locator = self.Locator.xpath_selector("//*[@text='Cancel']")
 
 
 class SignTransactionButton(BaseButton):
     def __init__(self, driver):
         super(SignTransactionButton, self).__init__(driver)
-        self.locator = self.Locator.accessibility_id('sign-transaction-button')
+        self.locator = self.Locator.accessibility_id('send-transaction-bottom-sheet')
 
 
 class AmountEditBox(BaseEditBox, BaseButton):
@@ -60,22 +60,34 @@ class ChooseRecipientButton(BaseButton):
         self.locator = self.Locator.accessibility_id('choose-recipient-button')
 
 
+class AccountsButton(BaseButton):
+    def __init__(self, driver):
+        super(AccountsButton, self).__init__(driver)
+        self.locator = self.Locator.accessibility_id('chose-recipient-accounts-button')
+
+
 class EnterRecipientAddressButton(BaseButton):
     def __init__(self, driver):
         super(EnterRecipientAddressButton, self).__init__(driver)
-        self.locator = self.Locator.xpath_selector("//*[@text='Enter recipient address']")
+        self.locator = self.Locator.accessibility_id('choose-recipient-recipient-code')
 
 
 class ScanQRCodeButton(BaseButton):
     def __init__(self, driver):
         super(ScanQRCodeButton, self).__init__(driver)
-        self.locator = self.Locator.text_selector('Scan QR code')
+        self.locator = self.Locator.accessibility_id('chose-recipient-scan-qr')
 
 
 class EnterRecipientAddressInput(BaseEditBox):
     def __init__(self, driver):
         super(EnterRecipientAddressInput, self).__init__(driver)
-        self.locator = self.Locator.xpath_selector("//*[@text='Enter recipient address']")
+        self.locator = self.Locator.accessibility_id("recipient-address-input")
+
+
+class EnterRecipientAddressInputText(BaseText):
+    def __init__(self, driver):
+        super(EnterRecipientAddressInputText, self).__init__(driver)
+        self.locator = self.Locator.xpath_selector("//*[@content-desc='choose-recipient-button']/android.widget.TextView")
 
 
 class RecentRecipientsButton(BaseButton):
@@ -100,10 +112,10 @@ class ErrorDialog(BaseView):
         return element.wait_for_element(wait_time)
 
 
-class AdvancedButton(BaseButton):
+class NetworkFeeButton(BaseButton):
     def __init__(self, driver):
-        super(AdvancedButton, self).__init__(driver)
-        self.locator = self.Locator.accessibility_id('advanced-button')
+        super(NetworkFeeButton, self).__init__(driver)
+        self.locator = self.Locator.xpath_selector('//*[@text="Network fee"]')
 
 
 class TransactionFeeButton(BaseButton):
@@ -112,42 +124,60 @@ class TransactionFeeButton(BaseButton):
         self.locator = self.Locator.accessibility_id('transaction-fee-button')
 
 
-class TransactionFeeTotalValue(BaseButton):
+class TransactionFeeTotalValue(BaseText):
     def __init__(self, driver):
         super(TransactionFeeTotalValue, self).__init__(driver)
-        self.locator = self.Locator.xpath_selector("//*[@content-desc='transaction-fee-button']"
-                                                   "/android.widget.TextView[1]")
+        self.locator = self.Locator.xpath_selector("//*[@text='Network fee']"
+                                                   "/following-sibling::android.widget.TextView")
 
 
 class GasLimitInput(BaseEditBox):
     def __init__(self, driver):
         super(GasLimitInput, self).__init__(driver)
-        self.locator = self.Locator.accessibility_id('gas-limit-input')
+        self.locator = self.Locator.xpath_selector("(//*[@text='Gas limit']/..//android.widget.EditText)[1]")
 
 
 class GasPriceInput(BaseEditBox):
     def __init__(self, driver):
         super(GasPriceInput, self).__init__(driver)
-        self.locator = self.Locator.accessibility_id('gas-price-input')
+        self.locator = self.Locator.xpath_selector("(//*[@text='Gas limit']/..//android.widget.EditText)[2]")
+
+    @property
+    def text(self):
+        return self.find_element().text
 
 
-class TotalFeeInput(BaseEditBox):
+class TotalFeeInput(BaseText):
     def __init__(self, driver):
         super(TotalFeeInput, self).__init__(driver)
-        self.locator = self.Locator.xpath_selector("//*[@content-desc='total-fee-input']/android.widget.TextView")
+        self.locator = self.Locator.xpath_selector("//*[@text='Total Fee']/following-sibling::android.widget.TextView")
+
+
+class UpdateFeeButton(BaseButton):
+    def __init__(self, driver):
+        super(UpdateFeeButton, self).__init__(driver)
+        self.locator = self.Locator.xpath_selector("//*[@text='Update']")
+
+    def click(self):
+        for _ in range(3):
+            self.driver.info('Tap on %s' % self.name)
+            self.find_element().click()
+            self.driver.info('Wait for no %s' % self.name)
+            if not self.is_element_displayed():
+                return self.navigate()
 
 
 class ShareButton(BaseButton):
 
     def __init__(self, driver):
         super(ShareButton, self).__init__(driver)
-        self.locator = self.Locator.accessibility_id('share-button')
+        self.locator = self.Locator.accessibility_id('share-address-button')
 
 
 class OnboardingMessage(BaseElement):
     def __init__(self, driver):
         super().__init__(driver)
-        self.locator = self.Locator.text_selector('Set up your wallet')
+        self.locator = self.Locator.text_selector('This is your signing phrase')
 
 
 class NotEnoughEthForGas(BaseText):
@@ -161,27 +191,46 @@ class ValidationWarnings(object):
         self.not_enough_eth_for_gas = NotEnoughEthForGas(driver)
 
 
+class SignWithPasswordButton(BaseButton):
+
+    def __init__(self, driver):
+        super(SignWithPasswordButton, self).__init__(driver)
+        self.locator = self.Locator.xpath_selector('//*[@text="Sign with password"]')
+
+
+class SignButton(BaseButton):
+
+    def __init__(self, driver):
+        super(SignButton, self).__init__(driver)
+        self.locator = self.Locator.xpath_selector('//*[@text="Sign"]')
+
+
 class SendTransactionView(BaseView):
     def __init__(self, driver):
         super(SendTransactionView, self).__init__(driver)
 
         self.chose_recipient_button = ChooseRecipientButton(self.driver)
+        self.accounts_button = AccountsButton(self.driver)
         self.enter_recipient_address_button = EnterRecipientAddressButton(self.driver)
         self.scan_qr_code_button = ScanQRCodeButton(self.driver)
         self.enter_recipient_address_input = EnterRecipientAddressInput(self.driver)
         self.first_recipient_button = FirstRecipient(self.driver)
+        self.enter_recipient_address_text = EnterRecipientAddressInputText(self.driver)
         self.recent_recipients_button = RecentRecipientsButton(self.driver)
         self.amount_edit_box = AmountEditBox(self.driver)
 
-        self.advanced_button = AdvancedButton(self.driver)
+        self.network_fee_button = NetworkFeeButton(self.driver)
         self.transaction_fee_button = TransactionFeeButton(self.driver)
         self.transaction_fee_total_value = TransactionFeeTotalValue(self.driver)
         self.gas_limit_input = GasLimitInput(self.driver)
         self.gas_price_input = GasPriceInput(self.driver)
         self.total_fee_input = TotalFeeInput(self.driver)
+        self.update_fee_button = UpdateFeeButton(self.driver)
 
         self.cancel_button = CancelButton(self.driver)
         self.sign_transaction_button = SignTransactionButton(self.driver)
+        self.sign_with_password = SignWithPasswordButton(self.driver)
+        self.sign_button = SignButton(self.driver)
         self.sign_in_phrase_text = SignInPhraseText(self.driver)
         self.password_input = PasswordInput(self.driver)
         self.enter_password_input = EnterPasswordInput(self.driver)
@@ -192,7 +241,6 @@ class SendTransactionView(BaseView):
         self.error_dialog = ErrorDialog(self.driver)
 
         self.share_button = ShareButton(self.driver)
-        self.progress_bar = ProgressBar(self.driver)
 
         self.onboarding_message = OnboardingMessage(self.driver)
         self.validation_warnings = ValidationWarnings(self.driver)
@@ -201,16 +249,18 @@ class SendTransactionView(BaseView):
         if self.onboarding_message.is_element_displayed():
             from views.wallet_view import WalletView
             wallet_view = WalletView(self.driver)
-            wallet_view.done_button.click()
-            self.yes_button.click()
+            wallet_view.ok_got_it_button.click()
 
     def sign_transaction(self, sender_password: str = common_password):
-        self.sign_transaction_button.click_until_presence_of_element(self.enter_password_input)
+        self.sign_with_password.click_until_presence_of_element(self.enter_password_input)
         self.enter_password_input.send_keys(sender_password)
-        self.sign_transaction_button.click_until_presence_of_element(self.got_it_button)
-        self.progress_bar.wait_for_invisibility_of_element(20)
-        self.got_it_button.click()
+        self.sign_button.click_until_absense_of_element(self.sign_button)
+        self.ok_button.wait_for_element(120)
+        self.ok_button.click()
 
     def get_transaction_fee_total(self):
         return self.transaction_fee_total_value.text.split()[0]
+
+    def get_formatted_recipient_address(self, address):
+        return address[:6] + '…' + address[-4:]
 

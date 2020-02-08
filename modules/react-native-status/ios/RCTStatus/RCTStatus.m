@@ -3,6 +3,7 @@
 #import "React/RCTBridge.h"
 #import "React/RCTEventDispatcher.h"
 #import "Statusgo/Statusgo.h"
+#import <SSZipArchive.h>
 
 @interface NSDictionary (BVJSONString)
 -(NSString*) bv_jsonStringWithPrettyPrint:(BOOL) prettyPrint;
@@ -87,86 +88,7 @@ static RCTBridge *bridge;
     return;
 }
 
-
 RCT_EXPORT_MODULE();
-
-////////////////////////////////////////////////////////////////////
-#pragma mark - startNode
-//////////////////////////////////////////////////////////////////// startNode
-RCT_EXPORT_METHOD(startNode:(NSString *)configString) {
-#if DEBUG
-    NSLog(@"StartNode() method called");
-#endif
-
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    NSError *error = nil;
-    NSURL *rootUrl =[[fileManager
-                      URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask]
-                     lastObject];
-    NSURL *absTestnetFolderName = [rootUrl URLByAppendingPathComponent:@"ethereum/testnet"];
-
-    if (![fileManager fileExistsAtPath:absTestnetFolderName.path])
-        [fileManager createDirectoryAtPath:absTestnetFolderName.path withIntermediateDirectories:YES attributes:nil error:&error];
-
-    NSURL *flagFolderUrl = [rootUrl URLByAppendingPathComponent:@"ropsten_flag"];
-
-    if(![fileManager fileExistsAtPath:flagFolderUrl.path]){
-        NSLog(@"remove lightchaindata");
-        NSURL *absLightChainDataUrl = [absTestnetFolderName URLByAppendingPathComponent:@"StatusIM/lightchaindata"];
-        if([fileManager fileExistsAtPath:absLightChainDataUrl.path]) {
-            [fileManager removeItemAtPath:absLightChainDataUrl.path
-                                    error:nil];
-        }
-        [fileManager createDirectoryAtPath:flagFolderUrl.path
-               withIntermediateDirectories:NO
-                                attributes:nil
-                                     error:&error];
-    }
-
-    NSLog(@"after remove lightchaindata");
-
-    NSURL *absTestnetKeystoreUrl = [absTestnetFolderName URLByAppendingPathComponent:@"keystore"];
-    NSURL *absKeystoreUrl = [rootUrl URLByAppendingPathComponent:@"keystore"];
-    if([fileManager fileExistsAtPath:absTestnetKeystoreUrl.path]){
-        NSLog(@"copy keystore");
-        [fileManager copyItemAtPath:absTestnetKeystoreUrl.path toPath:absKeystoreUrl.path error:nil];
-        [fileManager removeItemAtPath:absTestnetKeystoreUrl.path error:nil];
-    }
-
-    NSLog(@"after lightChainData");
-
-    NSLog(@"preconfig: %@", configString);
-    NSData *configData = [configString dataUsingEncoding:NSUTF8StringEncoding];
-    NSDictionary *configJSON = [NSJSONSerialization JSONObjectWithData:configData options:NSJSONReadingMutableContainers error:nil];
-    NSString *relativeDataDir = [configJSON objectForKey:@"DataDir"];
-    NSString *absDataDir = [rootUrl.path stringByAppendingString:relativeDataDir];
-    NSURL *absDataDirUrl = [NSURL fileURLWithPath:absDataDir];
-    NSURL *absLogUrl = [absDataDirUrl URLByAppendingPathComponent:@"geth.log"];
-    [configJSON setValue:absDataDirUrl.path forKey:@"DataDir"];
-    [configJSON setValue:absKeystoreUrl.path forKey:@"KeyStoreDir"];
-    [configJSON setValue:absLogUrl.path forKey:@"LogFile"];
-
-    NSString *resultingConfig = [configJSON bv_jsonStringWithPrettyPrint:NO];
-    NSLog(@"node config %@", resultingConfig);
-
-    if(![fileManager fileExistsAtPath:absDataDirUrl.path]) {
-        [fileManager createDirectoryAtPath:absDataDirUrl.path withIntermediateDirectories:YES attributes:nil error:nil];
-    }
-
-    NSLog(@"logUrlPath %@", absLogUrl.path);
-    if(![fileManager fileExistsAtPath:absLogUrl.path]) {
-        NSMutableDictionary *dict = [[NSMutableDictionary alloc] init];
-        [dict setObject:[NSNumber numberWithInt:511] forKey:NSFilePosixPermissions];
-        [fileManager createFileAtPath:absLogUrl.path contents:nil attributes:dict];
-    }
-
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),
-                   ^(void)
-                   {
-                       NSString *res = StatusgoStartNode(resultingConfig);
-                       NSLog(@"StartNode result %@", res);
-                   });
-}
 
 ////////////////////////////////////////////////////////////////////
 #pragma mark - shouldMoveToInternalStorage
@@ -184,54 +106,84 @@ RCT_EXPORT_METHOD(moveToInternalStorage:(RCTResponseSenderBlock)onResultCallback
     onResultCallback(@[[NSNull null]]);
 }
 
+
 ////////////////////////////////////////////////////////////////////
-#pragma mark - StopNode method
+#pragma mark - InitKeystore method
 //////////////////////////////////////////////////////////////////// StopNode
-RCT_EXPORT_METHOD(stopNode) {
+RCT_EXPORT_METHOD(initKeystore) {
 #if DEBUG
-    NSLog(@"StopNode() method called");
+    NSLog(@"initKeystore() method called");
 #endif
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSURL *rootUrl =[[fileManager
+                      URLsForDirectory:NSLibraryDirectory inDomains:NSUserDomainMask]
+                     lastObject];
+
+    NSURL *keystoreDir = [rootUrl URLByAppendingPathComponent:@"keystore"];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),
                    ^(void)
                    {
-                       NSString *res = StatusgoStopNode();
-                       NSLog(@"StopNode result %@", res);
+                        NSString *res = StatusgoInitKeystore(keystoreDir.path);
+                        NSLog(@"InitKeyStore result %@", res);
                    });
-}
-
-////////////////////////////////////////////////////////////////////
-#pragma mark - Accounts method
-//////////////////////////////////////////////////////////////////// createAccount
-RCT_EXPORT_METHOD(createAccount:(NSString *)password
-                  callback:(RCTResponseSenderBlock)callback) {
-#if DEBUG
-    NSLog(@"CreateAccount() method called");
-#endif
-    NSString *result = StatusgoCreateAccount(password);
-    callback(@[result]);
-}
-
-////////////////////////////////////////////////////////////////////
-#pragma mark - SendDataNotification method
-//////////////////////////////////////////////////////////////////// sendDataNotification
-RCT_EXPORT_METHOD(sendDataNotification:(NSString *)dataPayloadJSON
-                  tokensJSON:(NSString *)tokensJSON
-                  callback:(RCTResponseSenderBlock)callback) {
-    NSString* result = StatusgoSendDataNotification(dataPayloadJSON, tokensJSON);
-    callback(@[result]);
-#if DEBUG
-    NSLog(@"SendDataNotification() method called");
-#endif
 }
 
 ////////////////////////////////////////////////////////////////////
 #pragma mark - SendLogs method
 //////////////////////////////////////////////////////////////////// sendLogs
-RCT_EXPORT_METHOD(sendLogs:(NSString *)dbJson) {
+RCT_EXPORT_METHOD(sendLogs:(NSString *)dbJson
+                  jsLogs:(NSString *)jsLogs
+                  callback:(RCTResponseSenderBlock)callback) {
     // TODO: Implement SendLogs for iOS
 #if DEBUG
     NSLog(@"SendLogs() method called, not implemented");
 #endif
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSError *error = nil;
+    NSURL *rootUrl =[[fileManager
+                      URLsForDirectory:NSLibraryDirectory inDomains:NSUserDomainMask]
+                     lastObject];
+
+    NSURL *zipFile = [rootUrl URLByAppendingPathComponent:@"logs.zip"];
+    [fileManager removeItemAtPath:zipFile.path error:nil];
+
+    NSURL *logsFolderName = [rootUrl URLByAppendingPathComponent:@"logs"];
+
+    if (![fileManager fileExistsAtPath:logsFolderName.path])
+        [fileManager createDirectoryAtPath:logsFolderName.path withIntermediateDirectories:YES attributes:nil error:&error];
+
+    NSURL *dbFile = [logsFolderName URLByAppendingPathComponent:@"db.json"];
+    NSURL *jsLogsFile = [logsFolderName URLByAppendingPathComponent:@"Status.log"];
+#if DEBUG
+    NSString *networkDirPath = @"ethereum/mainnet_rpc_dev";
+#else
+    NSString *networkDirPath = @"ethereum/mainnet_rpc";
+#endif
+
+    NSURL *networkDir = [rootUrl URLByAppendingPathComponent:networkDirPath];
+    NSURL *originalGethLogsFile = [networkDir URLByAppendingPathComponent:@"geth.log"];
+    NSURL *gethLogsFile = [logsFolderName URLByAppendingPathComponent:@"geth.log"];
+
+    [dbJson writeToFile:dbFile.path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    [jsLogs writeToFile:jsLogsFile.path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+
+    //NSString* gethLogs = StatusgoExportNodeLogs();
+    //[gethLogs writeToFile:gethLogsFile.path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    [fileManager copyItemAtPath:originalGethLogsFile.path toPath:gethLogsFile.path error:nil];
+
+    [SSZipArchive createZipFileAtPath:zipFile.path withContentsOfDirectory:logsFolderName.path];
+    [fileManager removeItemAtPath:logsFolderName.path error:nil];
+
+    callback(@[zipFile.path]);
+}
+
+//////////////////////////////////////////////////////////////////// addPeer
+RCT_EXPORT_METHOD(exportLogs:(RCTResponseSenderBlock)callback) {
+#if DEBUG
+    NSLog(@"exportLogs() method called");
+#endif
+    NSString *result = StatusgoExportNodeLogs();
+    callback(@[result]);
 }
 
 //////////////////////////////////////////////////////////////////// addPeer
@@ -275,29 +227,236 @@ RCT_EXPORT_METHOD(chaosModeUpdate:(BOOL)on
 #endif
 }
 
-//////////////////////////////////////////////////////////////////// recoverAccount
-RCT_EXPORT_METHOD(recoverAccount:(NSString *)passphrase
-                  password:(NSString *)password
+//////////////////////////////////////////////////////////////////// multiAccountGenerateAndDeriveAddresses
+RCT_EXPORT_METHOD(multiAccountGenerateAndDeriveAddresses:(NSString *)json
                   callback:(RCTResponseSenderBlock)callback) {
 #if DEBUG
-    NSLog(@"RecoverAccount() method called");
+    NSLog(@"MultiAccountGenerateAndDeriveAddresses() method called");
 #endif
-    NSString *result = StatusgoRecoverAccount(password, passphrase);
+    NSString *result = StatusgoMultiAccountGenerateAndDeriveAddresses(json);
     callback(@[result]);
 }
 
-//////////////////////////////////////////////////////////////////// login
-RCT_EXPORT_METHOD(login:(NSString *)address
-                  password:(NSString *)password
+//////////////////////////////////////////////////////////////////// MultiAccountStoreAccount
+RCT_EXPORT_METHOD(multiAccountStoreAccount:(NSString *)json
                   callback:(RCTResponseSenderBlock)callback) {
+#if DEBUG
+    NSLog(@"MultiAccountStoreAccount() method called");
+#endif
+    NSString *result = StatusgoMultiAccountStoreAccount(json);
+    callback(@[result]);
+}
+
+//////////////////////////////////////////////////////////////////// MultiAccountLoadAccount
+RCT_EXPORT_METHOD(multiAccountLoadAccount:(NSString *)json
+                  callback:(RCTResponseSenderBlock)callback) {
+#if DEBUG
+    NSLog(@"MultiAccountLoadAccount() method called");
+#endif
+    NSString *result = StatusgoMultiAccountLoadAccount(json);
+    callback(@[result]);
+}
+
+//////////////////////////////////////////////////////////////////// MultiAccountReset
+RCT_EXPORT_METHOD(multiAccountReset:(RCTResponseSenderBlock)callback) {
+#if DEBUG
+    NSLog(@"MultiAccountReset() method called");
+#endif
+    NSString *result = StatusgoMultiAccountReset();
+    callback(@[result]);
+}
+
+//////////////////////////////////////////////////////////////////// multiAccountStoreDerived
+RCT_EXPORT_METHOD(multiAccountStoreDerived:(NSString *)json
+                  callback:(RCTResponseSenderBlock)callback) {
+#if DEBUG
+    NSLog(@"MultiAccountStoreDerived() method called");
+#endif
+    NSString *result = StatusgoMultiAccountStoreDerivedAccounts(json);
+    callback(@[result]);
+}
+
+//////////////////////////////////////////////////////////////////// multiAccountImportMnemonic
+RCT_EXPORT_METHOD(multiAccountImportMnemonic:(NSString *)json
+                  callback:(RCTResponseSenderBlock)callback) {
+#if DEBUG
+    NSLog(@"MultiAccountImportMnemonic() method called");
+#endif
+    NSString *result = StatusgoMultiAccountImportMnemonic(json);
+    callback(@[result]);
+}
+
+//////////////////////////////////////////////////////////////////// multiAccountDeriveAddresses
+RCT_EXPORT_METHOD(multiAccountDeriveAddresses:(NSString *)json
+                  callback:(RCTResponseSenderBlock)callback) {
+#if DEBUG
+    NSLog(@"MultiAccountDeriveAddresses() method called");
+#endif
+    NSString *result = StatusgoMultiAccountDeriveAddresses(json);
+    callback(@[result]);
+}
+
+//////////////////////////////////////////////////////////////////// prepareDirAndUpdateConfig
+-(NSString *) prepareDirAndUpdateConfig:(NSString *)config {
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSError *error = nil;
+    NSURL *rootUrl =[[fileManager
+                      URLsForDirectory:NSLibraryDirectory inDomains:NSUserDomainMask]
+                     lastObject];
+    NSURL *absTestnetFolderName = [rootUrl URLByAppendingPathComponent:@"ethereum/testnet"];
+
+    if (![fileManager fileExistsAtPath:absTestnetFolderName.path])
+        [fileManager createDirectoryAtPath:absTestnetFolderName.path withIntermediateDirectories:YES attributes:nil error:&error];
+
+    NSURL *flagFolderUrl = [rootUrl URLByAppendingPathComponent:@"ropsten_flag"];
+
+    if(![fileManager fileExistsAtPath:flagFolderUrl.path]){
+        NSLog(@"remove lightchaindata");
+        NSURL *absLightChainDataUrl = [absTestnetFolderName URLByAppendingPathComponent:@"StatusIM/lightchaindata"];
+        if([fileManager fileExistsAtPath:absLightChainDataUrl.path]) {
+            [fileManager removeItemAtPath:absLightChainDataUrl.path
+                                    error:nil];
+        }
+        [fileManager createDirectoryAtPath:flagFolderUrl.path
+               withIntermediateDirectories:NO
+                                attributes:nil
+                                     error:&error];
+    }
+
+    NSLog(@"after remove lightchaindata");
+
+    NSString *keystore = @"keystore";
+    NSURL *absTestnetKeystoreUrl = [absTestnetFolderName URLByAppendingPathComponent:keystore];
+    NSURL *absKeystoreUrl = [rootUrl URLByAppendingPathComponent:keystore];
+    if([fileManager fileExistsAtPath:absTestnetKeystoreUrl.path]){
+        NSLog(@"copy keystore");
+        [fileManager copyItemAtPath:absTestnetKeystoreUrl.path toPath:absKeystoreUrl.path error:nil];
+        [fileManager removeItemAtPath:absTestnetKeystoreUrl.path error:nil];
+    }
+
+    NSLog(@"after lightChainData");
+
+    NSLog(@"preconfig: %@", config);
+    NSData *configData = [config dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *configJSON = [NSJSONSerialization JSONObjectWithData:configData options:NSJSONReadingMutableContainers error:nil];
+    NSString *relativeDataDir = [configJSON objectForKey:@"DataDir"];
+    NSString *absDataDir = [rootUrl.path stringByAppendingString:relativeDataDir];
+    NSURL *absDataDirUrl = [NSURL fileURLWithPath:absDataDir];
+    NSURL *dataDirUrl = [NSURL fileURLWithPath:relativeDataDir];
+    NSURL *logUrl = [dataDirUrl URLByAppendingPathComponent:@"geth.log"];
+    [configJSON setValue:@"/keystore" forKey:@"KeyStoreDir"];
+    [configJSON setValue:@"" forKey:@"LogDir"];
+    [configJSON setValue:logUrl.path forKey:@"LogFile"];
+
+    NSString *resultingConfig = [configJSON bv_jsonStringWithPrettyPrint:NO];
+    NSLog(@"node config %@", resultingConfig);
+
+    if(![fileManager fileExistsAtPath:absDataDir]) {
+        [fileManager createDirectoryAtPath:absDataDir
+               withIntermediateDirectories:YES attributes:nil error:nil];
+    }
+
+    NSLog(@"logUrlPath %@ rootDir %@", logUrl.path, rootUrl.path);
+    NSURL *absLogUrl = [absDataDirUrl URLByAppendingPathComponent:@"geth.log"];
+    if(![fileManager fileExistsAtPath:absLogUrl.path]) {
+        NSMutableDictionary *dict = [[NSMutableDictionary alloc] init];
+        [dict setObject:[NSNumber numberWithInt:511] forKey:NSFilePosixPermissions];
+        [fileManager createFileAtPath:absLogUrl.path contents:nil attributes:dict];
+    }
+
+    return resultingConfig;
+
+}
+
+
+//////////////////////////////////////////////////////////////////// prepareDirAndUpdateConfig
+RCT_EXPORT_METHOD(prepareDirAndUpdateConfig:(NSString *)config
+                                   callback:(RCTResponseSenderBlock)callback) {
+
+#if DEBUG
+    NSLog(@"PrepareDirAndUpdateConfig() method called");
+#endif
+    NSString *updatedConfig = [self prepareDirAndUpdateConfig:config];
+    callback(@[updatedConfig]);
+
+}
+
+//////////////////////////////////////////////////////////////////// saveAccountAndLogin
+RCT_EXPORT_METHOD(saveAccountAndLogin:(NSString *)multiaccountData
+                  password:(NSString *)password
+                  settings:(NSString *)settings
+                  config:(NSString *)config
+                  accountsData:(NSString *)accountsData) {
+#if DEBUG
+    NSLog(@"SaveAccountAndLogin() method called");
+#endif
+    NSString *finalConfig = [self prepareDirAndUpdateConfig:config];
+    NSString *result = StatusgoSaveAccountAndLogin(multiaccountData, password, settings, finalConfig, accountsData);
+    NSLog(@"%@", result);
+}
+
+//////////////////////////////////////////////////////////////////// saveAccountAndLoginWithKeycard
+RCT_EXPORT_METHOD(saveAccountAndLoginWithKeycard:(NSString *)multiaccountData
+                  password:(NSString *)password
+                  settings:(NSString *)settings
+                  config:(NSString *)config
+                  accountsData:(NSString *)accountsData
+                  chatKey:(NSString *)chatKey) {
+#if DEBUG
+    NSLog(@"SaveAccountAndLoginWithKeycard() method called");
+#endif
+    NSString *finalConfig = [self prepareDirAndUpdateConfig:config];
+    NSString *result = StatusgoSaveAccountAndLoginWithKeycard(multiaccountData, password, settings, finalConfig, accountsData, chatKey);
+    NSLog(@"%@", result);
+}
+
+//////////////////////////////////////////////////////////////////// login
+RCT_EXPORT_METHOD(login:(NSString *)accountData
+                  password:(NSString *)password) {
 #if DEBUG
     NSLog(@"Login() method called");
 #endif
-    NSString *result = StatusgoLogin(address, password);
+    NSString *result = StatusgoLogin(accountData, password);
+    NSLog(@"%@", result);
+}
+
+//////////////////////////////////////////////////////////////////// loginWithKeycard
+RCT_EXPORT_METHOD(loginWithKeycard:(NSString *)accountData
+                  password:(NSString *)password
+                  chatKey:(NSString *)chatKey) {
+#if DEBUG
+    NSLog(@"LoginWithKeycard() method called");
+#endif
+    NSString *result = StatusgoLoginWithKeycard(accountData, password, chatKey);
+
+    NSLog(@"%@", result);
+}
+
+//////////////////////////////////////////////////////////////////// logout
+RCT_EXPORT_METHOD(logout) {
+#if DEBUG
+    NSLog(@"Logout() method called");
+#endif
+    NSString *result = StatusgoLogout();
+
+    NSLog(@"%@", result);
+}
+
+//////////////////////////////////////////////////////////////////// openAccounts
+RCT_EXPORT_METHOD(openAccounts:(RCTResponseSenderBlock)callback) {
+#if DEBUG
+    NSLog(@"OpenAccounts() method called");
+#endif
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSURL *rootUrl =[[fileManager
+                      URLsForDirectory:NSLibraryDirectory inDomains:NSUserDomainMask]
+                     lastObject];
+
+    NSString *result = StatusgoOpenAccounts(rootUrl.path);
     callback(@[result]);
 }
 
-//////////////////////////////////////////////////////////////////// login
+//////////////////////////////////////////////////////////////////// verityAccountPassword
 RCT_EXPORT_METHOD(verify:(NSString *)address
                   password:(NSString *)password
                   callback:(RCTResponseSenderBlock)callback) {
@@ -306,10 +465,10 @@ RCT_EXPORT_METHOD(verify:(NSString *)address
 #endif
     NSFileManager *fileManager = [NSFileManager defaultManager];
     NSURL *rootUrl =[[fileManager
-                      URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask]
+                      URLsForDirectory:NSLibraryDirectory inDomains:NSUserDomainMask]
                      lastObject];
     NSURL *absKeystoreUrl = [rootUrl URLByAppendingPathComponent:@"keystore"];
-    
+
     NSString *result = StatusgoVerifyAccountPassword(absKeystoreUrl.path, address, password);
     callback(@[result]);
 }
@@ -343,12 +502,13 @@ RCT_EXPORT_METHOD(signMessage:(NSString *)message
 #pragma mark - SignTypedData
 //////////////////////////////////////////////////////////////////// signTypedData
 RCT_EXPORT_METHOD(signTypedData:(NSString *)data
+                  account:(NSString *)account
                   password:(NSString *)password
                   callback:(RCTResponseSenderBlock)callback) {
 #if DEBUG
     NSLog(@"SignTypedData() method called");
 #endif
-    NSString *result = StatusgoSignTypedData(data, password);
+    NSString *result = StatusgoSignTypedData(data, account, password);
     callback(@[result]);
 }
 
@@ -377,30 +537,6 @@ RCT_EXPORT_METHOD(extractGroupMembershipSignatures:(NSString *)content
 }
 
 ////////////////////////////////////////////////////////////////////
-#pragma mark - EnableInstallation
-//////////////////////////////////////////////////////////////////// enableInstallation
-RCT_EXPORT_METHOD(enableInstallation:(NSString *)content
-                  callback:(RCTResponseSenderBlock)callback) {
-#if DEBUG
-    NSLog(@"EnableInstallation() method called");
-#endif
-    NSString *result = StatusgoEnableInstallation(content);
-    callback(@[result]);
-}
-
-////////////////////////////////////////////////////////////////////
-#pragma mark - DisableInstallation
-//////////////////////////////////////////////////////////////////// disableInstallation
-RCT_EXPORT_METHOD(disableInstallation:(NSString *)content
-                  callback:(RCTResponseSenderBlock)callback) {
-#if DEBUG
-    NSLog(@"DisableInstallation() method called");
-#endif
-    NSString *result = StatusgoDisableInstallation(content);
-    callback(@[result]);
-}
-
-////////////////////////////////////////////////////////////////////
 #pragma mark - only android methods
 ////////////////////////////////////////////////////////////////////
 RCT_EXPORT_METHOD(setAdjustResize) {
@@ -424,6 +560,7 @@ RCT_EXPORT_METHOD(setSoftInputMode: (NSInteger) i) {
 RCT_EXPORT_METHOD(clearCookies) {
     NSHTTPCookie *cookie;
     NSHTTPCookieStorage *storage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+
     for (cookie in [storage cookies]) {
         [storage deleteCookie:cookie];
     }
@@ -449,6 +586,51 @@ RCT_EXPORT_METHOD(callRPC:(NSString *)payload
             callback(@[result]);
         });
     });
+}
+
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(generateAlias:(NSString *)publicKey) {
+  return StatusgoGenerateAlias(publicKey);
+}
+
+RCT_EXPORT_METHOD(generateAliasAsync:(NSString *)publicKey
+                  callback:(RCTResponseSenderBlock)callback) {
+#if DEBUG
+    NSLog(@"generateAliasAsync() method called");
+#endif
+    NSString *result = StatusgoGenerateAlias(publicKey);
+    callback(@[result]);
+}
+
+RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(identicon:(NSString *)publicKey) {
+  return StatusgoIdenticon(publicKey);
+}
+
+RCT_EXPORT_METHOD(validateMnemonic:(NSString *)seed
+                  callback:(RCTResponseSenderBlock)callback) {
+#if DEBUG
+    NSLog(@"validateMnemonic() method called");
+#endif
+    NSString *result = StatusgoValidateMnemonic(seed);
+    callback(@[result]);
+}
+
+RCT_EXPORT_METHOD(identiconAsync:(NSString *)publicKey
+                  callback:(RCTResponseSenderBlock)callback) {
+#if DEBUG
+    NSLog(@"identiconAsync() method called");
+#endif
+    NSString *result = StatusgoIdenticon(publicKey);
+    callback(@[result]);
+}
+
+RCT_EXPORT_METHOD(generateAliasAndIdenticonAsync:(NSString *)publicKey
+                  callback:(RCTResponseSenderBlock)callback) {
+#if DEBUG
+    NSLog(@"generateAliasAndIdenticonAsync() method called");
+#endif
+    NSString *identiconResult = StatusgoIdenticon(publicKey);
+    NSString *aliasResult = StatusgoGenerateAlias(publicKey);
+    callback(@[aliasResult, identiconResult]);
 }
 
 RCT_EXPORT_METHOD(callPrivateRPC:(NSString *)payload
@@ -481,14 +663,16 @@ RCT_EXPORT_METHOD(appStateChange:(NSString *)type) {
     StatusgoAppStateChange(type);
 }
 
-RCT_EXPORT_METHOD(getDeviceUUID:(RCTResponseSenderBlock)callback) {
-#if DEBUG
-    NSLog(@"getDeviceUUID() method called");
-#endif
-    NSString* Identifier = [[[UIDevice currentDevice] identifierForVendor] UUIDString];
+RCT_EXPORT_METHOD(setBlankPreviewFlag:(BOOL *)newValue)
+{
+  NSUserDefaults *userDefaults = [NSUserDefaults standardUserDefaults];
 
-    callback(@[Identifier]);
+  [userDefaults setBool:newValue forKey:@"BLANK_PREVIEW"];
+
+  [userDefaults synchronize];
 }
+
+//// deviceinfo
 
 - (bool) is24Hour
 {
@@ -496,10 +680,55 @@ RCT_EXPORT_METHOD(getDeviceUUID:(RCTResponseSenderBlock)callback) {
     return ([format rangeOfString:@"a"].location == NSNotFound);
 }
 
+- (NSString *)getBuildId {
+    return @"not available";
+}
+
+- (NSString*) deviceId
+{
+    struct utsname systemInfo;
+
+    uname(&systemInfo);
+
+    NSString* deviceId = [NSString stringWithCString:systemInfo.machine
+                                            encoding:NSUTF8StringEncoding];
+
+    if ([deviceId isEqualToString:@"i386"] || [deviceId isEqualToString:@"x86_64"] ) {
+        deviceId = [NSString stringWithFormat:@"%s", getenv("SIMULATOR_MODEL_IDENTIFIER")];
+    }
+
+    return deviceId;
+}
+
+- (NSString*) deviceName
+{
+
+    NSString* deviceName = nil;
+
+    if ([self.deviceId rangeOfString:@"iPod"].location != NSNotFound) {
+        deviceName = @"iPod Touch";
+    }
+    else if([self.deviceId rangeOfString:@"iPad"].location != NSNotFound) {
+        deviceName = @"iPad";
+    }
+    else if([self.deviceId rangeOfString:@"iPhone"].location != NSNotFound){
+        deviceName = @"iPhone";
+    }
+    else if([self.deviceId rangeOfString:@"AppleTV"].location != NSNotFound){
+        deviceName = @"Apple TV";
+    }
+
+    return deviceName;
+}
+
 - (NSDictionary *)constantsToExport
 {
     return @{
              @"is24Hour": @(self.is24Hour),
+             @"model": self.deviceName ?: [NSNull null],
+             @"brand": @"Apple",
+             @"buildId": [self getBuildId],
+             @"deviceId": self.deviceId ?: [NSNull null],
              };
 }
 

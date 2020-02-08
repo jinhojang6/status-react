@@ -1,27 +1,25 @@
-(ns status-im.ui.screens.routing.wallet-stack)
+(ns status-im.ui.screens.routing.wallet-stack
+  (:require [status-im.utils.config :as config]))
 
 (def wallet-stack
   {:name    :wallet-stack
-   :screens [:wallet
-             :collectibles-list
-             :wallet-onboarding-setup
-             :wallet-send-transaction-chat
-             :contact-code
-             {:name    :send-transaction-stack
-              :screens [:wallet-send-transaction
-                        :recent-recipients
-                        :wallet-transaction-sent
-                        :enter-pin
-                        :hardwallet-connect
-                        :recipient-qr-code
-                        :wallet-send-assets]}
-             {:name    :request-transaction-stack
-              :screens [:wallet-request-transaction
-                        :wallet-send-transaction-request
-                        :wallet-request-assets
-                        :recent-recipients]}
-             :unsigned-transactions
-             :transactions-history
-             :wallet-transaction-details
-             :wallet-settings-hook]
+   :screens (cond-> [:wallet
+                     :wallet-account
+                     :add-new-account
+                     :add-watch-account
+                     :add-new-account-password
+                     :add-new-account-pin
+                     :account-added
+                     :account-settings
+                     :collectibles-list
+                     :wallet-onboarding-setup
+                     :wallet-transaction-details
+                     :wallet-settings-hook
+                     :wallet-settings-assets
+                     :wallet-add-custom-token
+                     :wallet-custom-token-details
+                     :currency-settings]
+              config/hardwallet-enabled?
+              (concat [:keycard-connection-lost
+                       :keycard-processing]))
    :config  {:initialRouteName :wallet}})

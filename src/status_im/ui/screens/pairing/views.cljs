@@ -4,25 +4,18 @@
             [status-im.i18n :as i18n]
             [reagent.core :as reagent]
             [clojure.string :as string]
-            [status-im.utils.config :as config]
-            [status-im.ui.components.bottom-bar.styles :as main-tabs.styles]
+            [status-im.ui.components.tabbar.styles :as main-tabs.styles]
             [status-im.ui.components.colors :as colors]
             [status-im.ui.components.icons.vector-icons :as icons]
-            [status-im.ui.screens.home.styles :as home.styles]
             [status-im.utils.platform :as utils.platform]
-            [status-im.utils.gfycat.core :as gfycat]
-            [status-im.ui.components.button.view :as buttons]
             [status-im.ui.components.styles :as components.styles]
             [status-im.ui.components.common.common :as components.common]
             [status-im.ui.components.checkbox.view :as checkbox.views]
             [status-im.ui.components.list.views :as list]
             [status-im.ui.components.react :as react]
-            [status-im.ui.components.status-bar.view :as status-bar]
-            [status-im.ui.components.toolbar.view :as toolbar]
-            [status-im.ui.components.toolbar.actions :as toolbar.actions]
             [status-im.ui.components.text-input.view :as text-input]
-            [status-im.ui.screens.profile.components.views :as profile.components]
-            [status-im.ui.screens.pairing.styles :as styles]))
+            [status-im.ui.screens.pairing.styles :as styles]
+            [status-im.ui.components.topbar :as topbar]))
 
 (def syncing (reagent/atom false))
 (def installation-name (reagent/atom ""))
@@ -77,7 +70,8 @@
       [icons/icon :main-icons/add (icon-style (styles/pairing-button-icon true))]]]
     [react/view {:style styles/pairing-actions-text}
      [react/view
-      [react/text {:style styles/pair-this-device-title} (i18n/label :t/pair-this-device)]]
+      [react/text {:style               styles/pair-this-device-title
+                   :accessibility-label :advertise-device} (i18n/label :t/pair-this-device)]]
      [react/view
       [react/text (i18n/label :t/pair-this-device-description)]]]]])
 
@@ -95,17 +89,19 @@
          (i18n/label :t/syncing-devices)
          (i18n/label :t/sync-all-devices))]]]]])
 
-(defn your-device [installation-id installation-name]
+(defn your-device [{:keys [installation-id name device-type]}]
   [react/view {:style styles/installation-item}
    [react/view {:style (styles/pairing-button true)}
-    [icons/icon (if utils.platform/desktop?
-                  :main-icons/desktop
-                  :main-icons/mobile)
+    [icons/icon  (if (= "desktop"
+                        device-type)
+                   :main-icons/desktop
+                   :main-icons/mobile)
+
      (icon-style (styles/pairing-button-icon true))]]
    [react/view {:style styles/pairing-actions-text}
     [react/view
      [react/text (str
-                  installation-name
+                  name
                   " ("
                   (i18n/label :t/you)
                   ", "
@@ -127,28 +123,28 @@
       (icon-style (styles/pairing-button-icon enabled?))]]
     [react/view {:style styles/pairing-actions-text}
      [react/view
-      [react/text (if (string/blank? name)
-                    (str
+      [react/text (str
+                   (if (string/blank? name)
                      (i18n/label :t/pairing-no-info)
-                     " ("
-                     (subs installation-id 0 5)
-                     ")")
-                    name)]]]
+                     name)
+                   " ("
+                   (subs installation-id 0 5)
+                   ")")]]]
     [react/view
      (if utils.platform/ios?
        ;; On IOS switches seems to be broken, they take up value of dev-mode? (so if dev mode is on they all show to be on).
        ;; Replacing therefore with checkbox until I have more time to investigate
        (checkbox.views/checkbox {:checked? enabled?
                                  :on-value-change (partial toggle-enabled! installation-id enabled?)})
-       [react/switch {:on-tint-color   colors/blue
+       [react/switch {:track-color     #js {:true colors/blue :false nil}
                       :value           enabled?
                       :on-value-change (partial toggle-enabled! installation-id enabled?)}])]]])
 
-(defn render-rows [installation-id installation-name installations]
+(defn render-rows [installations]
   [react/scroll-view {:style styles/wrapper}
-   [your-device installation-id installation-name]
-   (when (seq installations)
-     [list/flat-list {:data               installations
+   [your-device (first installations)]
+   (when (seq (rest installations))
+     [list/flat-list {:data               (rest installations)
                       :default-separator? false
                       :key-fn             :installation-id
                       :render-fn          render-row}])])
@@ -160,11 +156,12 @@
      [react/text (i18n/label :t/pairing-please-set-a-name)]]
     [text-input/text-input-with-label
      {:placeholder     (i18n/label :t/specify-name)
-      :style           styles/input
-      :container       styles/input-container
-      :default-value   @installation-name
-      :on-change-text  #(reset! installation-name %)
-      :auto-focus      true}]]
+      :style               styles/input
+      :accessibility-label :device-name
+      :container           styles/input-container
+      :default-value       @installation-name
+      :on-change-text      #(reset! installation-name %)
+      :auto-focus          true}]]
    [react/view styles/bottom-container
     [react/view components.styles/flex]
     [components.common/bottom-button
@@ -180,26 +177,21 @@
    [react/touchable-highlight {:on-press #(.openURL react/linking "https://status.im/tutorials/pairing.html")}
     [react/text {:style styles/info-section-text} (i18n/label :t/learn-more)]]])
 
-(defn installations-list [installation-id installation-name installations]
+(defn installations-list [installations]
   [react/view {:style styles/installation-list}
    [react/view {:style styles/paired-devices-title}
     [react/text (i18n/label :t/paired-devices)]]
-   (render-rows installation-id installation-name installations)])
+   (render-rows installations)])
 
 (views/defview installations []
-  (views/letsubs [installation-id [:pairing/installation-id]
-                  installation-name [:pairing/installation-name]
-                  installations [:pairing/installations]]
+  (views/letsubs [installations [:pairing/installations]]
     [react/view {:flex 1}
-     [status-bar/status-bar]
-     [toolbar/toolbar {}
-      toolbar/default-nav-back
-      [toolbar/content-title (i18n/label :t/devices)]]
+     [topbar/topbar {:title :t/devices}]
      [react/scroll-view {:style {:background-color :white}}
-      (if (string/blank? installation-name)
+      (if (string/blank? (-> installations first :name))
         [edit-installation-name]
         [react/view
          [pair-this-device]
          [info-section]
-         [installations-list installation-id installation-name installations]])]
+         [installations-list installations]])]
      (when (seq installations) [footer syncing])]))

@@ -5,10 +5,7 @@
             [re-frame.core :as re-frame]
             [status-im.ui.screens.chat.styles.input.input :as style]
             [status-im.ui.screens.chat.styles.message.message :as message-style]
-            [status-im.ui.screens.chat.input.parameter-box :as parameter-box]
             [status-im.ui.screens.chat.input.send-button :as send-button]
-            [status-im.ui.screens.chat.input.suggestions :as suggestions]
-            [status-im.ui.screens.chat.input.validation-messages :as validation-messages]
             [status-im.ui.screens.chat.photos :as photos]
             [status-im.ui.screens.chat.utils :as chat-utils]
             [status-im.i18n :as i18n]
@@ -20,10 +17,12 @@
             [status-im.utils.gfycat.core :as gfycat]
             [status-im.utils.utils :as utils]
             [status-im.utils.config :as config]
-            [status-im.ui.screens.chat.stickers.views :as stickers]))
+            [taoensso.timbre :as log]
+            [status-im.ui.screens.chat.stickers.views :as stickers]
+            [status-im.ui.screens.chat.extensions.views :as extensions]))
 
 (defview basic-text-input [{:keys [set-container-width-fn height single-line-input?]}]
-  (letsubs [{:keys [input-text]} [:chats/current-chat]
+  (letsubs [input-text           [:chats/current-chat-input-text]
             cooldown-enabled?    [:chats/cooldown-enabled?]]
     [react/text-input
      (merge
@@ -34,7 +33,7 @@
        :editable               (not cooldown-enabled?)
        :blur-on-submit         false
        :on-focus               #(re-frame/dispatch [:chat.ui/set-chat-ui-props {:input-focused?    true
-                                                                                :show-stickers?    false
+                                                                                :input-bottom-sheet nil
                                                                                 :messages-focused? false}])
        :on-blur                #(re-frame/dispatch [:chat.ui/set-chat-ui-props {:input-focused? false}])
        :on-submit-editing      #(when single-line-input?
@@ -51,31 +50,52 @@
       (when cooldown-enabled?
         {:placeholder (i18n/label :cooldown/text-input-disabled)}))]))
 
+(defview basic-text-input-desktop [{:keys [set-container-width-fn height single-line-input? set-text state-text]}]
+  (letsubs [inp-ref       (atom nil)
+            cooldown-enabled?    [:chats/cooldown-enabled?]]
+    [react/text-input
+     (merge
+      {:ref                    #(when % (do
+                                          (reset! inp-ref %)
+                                          (re-frame/dispatch [:chat.ui/set-chat-ui-props {:input-ref %}])))
+       :accessibility-label    :chat-message-input
+       :multiline              (not single-line-input?)
+       :default-value          @state-text
+       :editable               (not cooldown-enabled?)
+       :blur-on-submit         false
+       :on-focus               #(re-frame/dispatch [:chat.ui/set-chat-ui-props {:input-focused?    true
+                                                                                :input-bottom-sheet nil
+                                                                                :messages-focused? false}])
+       :on-blur                #(re-frame/dispatch [:chat.ui/set-chat-ui-props {:input-focused? false}])
+       :submit-shortcut        {:key "Enter"}
+       :on-submit-editing      #(do
+                                  (.clear @inp-ref)
+                                  (.focus @inp-ref)
+                                  (re-frame/dispatch [:chat.ui/set-chat-input-text @state-text])
+                                  (re-frame/dispatch [:chat.ui/send-current-message])
+                                  (set-text ""))
+       :on-layout              #(set-container-width-fn (.-width (.-layout (.-nativeEvent %))))
+       :on-change              #(do
+                                  (set-text (.-text (.-nativeEvent %))))
+       :on-end-editing         #(re-frame/dispatch [:chat.ui/set-chat-input-text @state-text])
+       :on-selection-change    #(let [s (-> (.-nativeEvent %)
+                                            (.-selection))
+                                      end (.-end s)]
+                                  (re-frame/dispatch [:chat.ui/set-chat-ui-props {:selection end}]))
+       :style                  (style/input-view single-line-input?)
+       :placeholder-text-color colors/gray
+       :auto-capitalize        :sentences}
+      (when cooldown-enabled?
+        {:placeholder (i18n/label :cooldown/text-input-disabled)}))]))
+
 (defview invisible-input [{:keys [set-layout-width-fn value]}]
-  (letsubs [{:keys [input-text]} [:chats/current-chat]]
+  (letsubs [input-text    [:chats/current-chat-input-text]]
     [react/text {:style     style/invisible-input-text
                  :on-layout #(let [w (-> (.-nativeEvent %)
                                          (.-layout)
                                          (.-width))]
                                (set-layout-width-fn w))}
      (or input-text "")]))
-
-(defn- input-helper-view-on-update [{:keys [opacity-value placeholder]}]
-  (fn [_]
-    (let [to-value (if @placeholder 1 0)]
-      (animation/start
-       (animation/timing opacity-value {:toValue  to-value
-                                        :duration 300})))))
-
-(defview input-helper [{:keys [width]}]
-  (letsubs [placeholder   [:chats/input-placeholder]
-            opacity-value (animation/create-value 0)
-            on-update     (input-helper-view-on-update {:opacity-value opacity-value
-                                                        :placeholder   placeholder})]
-    {:component-did-update on-update}
-    [react/animated-view {:style (style/input-helper-view width opacity-value)}
-     [react/text {:style (style/input-helper-text width)}
-      placeholder]]))
 
 (defn get-options [type]
   (case (keyword type)
@@ -84,58 +104,64 @@
     :number {:keyboard-type "numeric"}
     nil))
 
-(defview input-view [{:keys [single-line-input?]}]
-  (letsubs [command [:chats/selected-chat-command]]
-    (let [component              (reagent/current-component)
-          set-layout-width-fn    #(reagent/set-state component {:width %})
-          set-container-width-fn #(reagent/set-state component {:container-width %})
-          {:keys [width]} (reagent/state component)]
-      [react/view {:style style/input-root}
-       [react/animated-view {:style style/input-animated}
-        [invisible-input {:set-layout-width-fn set-layout-width-fn}]
+(defview input-view [{:keys [single-line-input? set-text state-text]}]
+  (let [component              (reagent/current-component)
+        set-layout-width-fn    #(reagent/set-state component {:width %})
+        set-container-width-fn #(reagent/set-state component {:container-width %})
+        {:keys [width]} (reagent/state component)]
+    [react/view {:style style/input-root}
+     [react/animated-view {:style style/input-animated}
+      [invisible-input {:set-layout-width-fn set-layout-width-fn}]
+      (if platform/desktop?
+        [basic-text-input-desktop {:set-container-width-fn set-container-width-fn
+                                   :single-line-input?     single-line-input?
+                                   :set-text               set-text
+                                   :state-text             state-text}]
         [basic-text-input {:set-container-width-fn set-container-width-fn
-                           :single-line-input?     single-line-input?}]
-        [input-helper {:width width}]]])))
+                           :single-line-input?     single-line-input?}])]]))
 
-(defview commands-button []
-  (letsubs [commands      [:chats/all-available-commands]
-            reply-message [:chats/reply-message]]
-    (when (and (not reply-message) (seq commands))
-      [react/touchable-highlight
-       {:on-press            #(re-frame/dispatch [:chat.ui/set-command-prefix])
-        :accessibility-label :chat-commands-button}
-       [react/view
-        [vector-icons/icon :main-icons/commands {:container-style style/input-commands-icon
-                                                 :color           colors/gray}]]])))
-
-(defview reply-message [from message-text]
-  (letsubs [username           [:contacts/contact-name-by-identity from]
-            current-public-key [:account/public-key]]
+(defview reply-message [from alias message-text]
+  (letsubs [{:keys [ens-name]} [:contacts/contact-name-by-identity from]
+            current-public-key [:multiaccount/public-key]]
     [react/scroll-view {:style style/reply-message-content}
-     (chat-utils/format-reply-author from username current-public-key style/reply-message-author)
-     [react/text {:style (message-style/style-message-text false)} message-text]]))
+     [react/view {:style style/reply-message-to-container}
+      (chat-utils/format-reply-author from alias ens-name current-public-key style/reply-message-author)]
+     [react/text {:style (assoc (message-style/style-message-text false) :font-size 14) :number-of-lines 3} message-text]]))
 
 (defview reply-message-view []
-  (letsubs [{:keys [content from] :as message} [:chats/reply-message]]
+  (letsubs [{:keys [content from alias] :as message} [:chats/reply-message]]
     (when message
       [react/view {:style style/reply-message-container}
        [react/view {:style style/reply-message}
         [photos/member-photo from]
-        [reply-message from (:text content)]]
-       [react/touchable-highlight
-        {:style               style/cancel-reply-highlight
-         :on-press            #(re-frame/dispatch [:chat.ui/cancel-message-reply])
-         :accessibility-label :cancel-message-reply}
-        [react/view {:style style/cancel-reply-container}
-         [vector-icons/icon :main-icons/close {:container-style style/cancel-reply-icon
-                                               :color           colors/white}]]]])))
+        [reply-message from alias (:text content)]
+        [react/touchable-highlight
+         {:style               style/cancel-reply-highlight
+          :on-press            #(re-frame/dispatch [:chat.ui/cancel-message-reply])
+          :accessibility-label :cancel-message-reply}
+         [react/view {:style style/cancel-reply-container}
+          [vector-icons/icon :main-icons/close {:container-style style/cancel-reply-icon
+                                                :width 19
+                                                :height 19
+                                                :color           colors/white}]]]]])))
 
-(defview input-container []
+(defview container []
   (letsubs [margin               [:chats/input-margin]
-            {:keys [input-text]} [:chats/current-chat]
+            mainnet?             [:mainnet?]
+            input-text           [:chats/current-chat-input-text]
             result-box           [:chats/current-chat-ui-prop :result-box]
-            show-stickers?       [:chats/current-chat-ui-prop :show-stickers?]]
-    (let [single-line-input? (:singleLineInput result-box)]
+            input-bottom-sheet   [:chats/current-chat-ui-prop :input-bottom-sheet]
+            one-to-one-chat?     [:current-chat/one-to-one-chat?]
+            state-text           (reagent/atom "")]
+    {:component-will-unmount #(when platform/desktop?
+                                (re-frame/dispatch [:chat.ui/set-chat-input-text @state-text]))
+
+     :component-did-mount    #(when-not (string/blank? input-text) (reset! state-text input-text))}
+    (let [single-line-input? (:singleLineInput result-box)
+          set-text           #(reset! state-text %)
+          input-text-empty? (if platform/desktop?
+                              (string/blank? state-text)
+                              (string/blank? input-text))]
       [react/view {:style     (style/root margin)
                    :on-layout #(let [h (-> (.-nativeEvent %)
                                            (.-layout)
@@ -144,16 +170,17 @@
                                    (re-frame/dispatch [:chat.ui/set-chat-ui-props {:input-height h}])))}
        [reply-message-view]
        [react/view {:style style/input-container}
-        [input-view {:single-line-input? single-line-input?}]
-        (when (and config/stickers-enabled? (string/blank? input-text))
-          [stickers/button show-stickers?])
-        (if (string/blank? input-text)
-          [commands-button]
-          [send-button/send-button-view])]])))
-
-(defn container []
-  [react/view
-   [parameter-box/parameter-box-view]
-   [suggestions/suggestions-view]
-   [validation-messages/validation-messages-view]
-   [input-container]])
+        [input-view {:single-line-input? single-line-input? :set-text set-text :state-text state-text}]
+        (when (and input-text-empty? mainnet?)
+          [stickers/button (= :stickers input-bottom-sheet)])
+        (when (and one-to-one-chat? input-text-empty? mainnet?)
+          [extensions/button (= :extensions input-bottom-sheet)])
+        (when-not input-text-empty?
+          (if platform/desktop?
+            [send-button/send-button-view {:input-text @state-text}
+             #(do
+                (re-frame/dispatch [:chat.ui/set-chat-input-text @state-text])
+                (re-frame/dispatch [:chat.ui/send-current-message])
+                (set-text ""))]
+            [send-button/send-button-view {:input-text input-text}
+             #(re-frame/dispatch [:chat.ui/send-current-message])]))]])))

@@ -5,17 +5,16 @@
             [status-im.ui.screens.hardwallet.connect.styles :as styles]
             [status-im.ui.components.icons.vector-icons :as vector-icons]
             [status-im.ui.components.react :as react]
-            [status-im.ui.components.toolbar.view :as toolbar]
-            [status-im.ui.components.styles :as components.styles]
-            [status-im.ui.components.status-bar.view :as status-bar]
             [status-im.i18n :as i18n]
-            [status-im.ui.components.colors :as colors]))
+            [status-im.ui.components.colors :as colors]
+            [status-im.ui.components.toolbar.actions :as toolbar.actions]
+            [status-im.ui.components.topbar :as topbar]))
 
 (defview nfc-enabled []
   (letsubs [card-read-in-progress? [:hardwallet/card-read-in-progress?]]
     [react/view styles/nfc-enabled-container
      [react/view
-      [react/image {:source (:hold-card-animation resources/ui)
+      [react/image {:source (resources/get-image :hold-card-animation)
                     :style  styles/phone-nfc-on-image}]]
      [react/view styles/turn-nfc-text-container
       [react/text {:style           styles/status-hardwallet-text
@@ -29,7 +28,7 @@
 (defn nfc-disabled []
   [react/view styles/nfc-disabled-container
    [react/view
-    [react/image {:source (:phone-nfc-off resources/ui)
+    [react/image {:source (resources/get-image :phone-nfc-off)
                   :style  styles/phone-nfc-off-image}]]
    [react/view styles/turn-nfc-text-container
     [react/text {:style    styles/status-hardwallet-text
@@ -43,13 +42,14 @@
   (letsubs [nfc-enabled? [:hardwallet/nfc-enabled?]
             setup-step [:hardwallet-setup-step]]
     [react/view styles/container
-     [status-bar/status-bar]
      [react/view {:flex            1
                   :flex-direction  :column
                   :justify-content :space-between}
-      [toolbar/toolbar {}
-       toolbar/default-nav-back
-       nil]
+      [topbar/topbar
+       {:navigation
+        {:icon    :main-icons/back
+         :accessibility-label :back-button
+         :handler #(re-frame/dispatch [:hardwallet.ui/hardwallet-connect-navigate-back-button-clicked])}}]
       [react/view styles/hardwallet-connect
        (if nfc-enabled?
          [nfc-enabled]

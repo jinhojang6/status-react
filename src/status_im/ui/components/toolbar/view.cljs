@@ -33,10 +33,10 @@
 (defn nav-text
   ([text] (nav-text nil text))
   ([{:keys [handler] :as props} text]
-   [react/text (utils/deep-merge {:style    styles/item-text
-                                  :on-press (or handler #(re-frame/dispatch [:navigate-back]))}
-                                 props)
-    text]))
+   [react/touchable-highlight {:on-press (or handler #(re-frame/dispatch [:navigate-back]))}
+    [react/text (utils/deep-merge {:style styles/item-text}
+                                  props)
+     text]]))
 
 (defn nav-clear-text
   ([text] (nav-clear-text nil text))
@@ -163,10 +163,3 @@
                  :justify-content :center
                  :align-items     :center}
      action-items]]))
-
-;;TODO remove
-(defn simple-toolbar
-  "A simple toolbar composed of a nav-back item and a single line title."
-  ([] (simple-toolbar nil))
-  ([title] (simple-toolbar title false))
-  ([title modal?] (toolbar nil (if modal? default-nav-close default-nav-back) [content-title title])))

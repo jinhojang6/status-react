@@ -1,30 +1,27 @@
 (ns status-im.ui.screens.db
   (:require [cljs.spec.alpha :as spec]
             [status-im.constants :as constants]
-            [status-im.utils.platform :as platform]
             [status-im.utils.dimensions :as dimensions]
             [status-im.fleet.core :as fleet]
             status-im.transport.db
-            status-im.accounts.db
+            status-im.multiaccounts.db
             status-im.contact.db
-            status-im.ui.screens.qr-scanner.db
             status-im.ui.screens.group.db
             status-im.chat.specs
             status-im.ui.screens.profile.db
-            status-im.ui.screens.network-settings.db
+            status-im.network.module
             status-im.mailserver.db
+            status-im.ens.db
             status-im.browser.db
-            status-im.ui.screens.add-new.db
             status-im.ui.screens.add-new.new-public-chat.db
-            status-im.ui.components.bottom-sheet.core))
+            status-im.ui.components.bottom-sheet.core
+            [status-im.wallet.db :as wallet.db]))
 
 ;; initial state of app-db
 (def app-db {:keyboard-height                    0
-             :tab-bar-visible?                   true
-             :navigation-stack                   '()
+             :navigation-stack                   '(:multiaccounts)
              :contacts/contacts                  {}
              :pairing/installations              {}
-             :contact-recovery/pop-up            #{}
              :qr-codes                           {}
              :group/selected-contacts            #{}
              :chats                              {}
@@ -32,19 +29,13 @@
              :selected-participants              #{}
              :sync-state                         :done
              :app-state                          "active"
-             :wallet.transactions                constants/default-wallet-transactions
-             :wallet-selected-asset              {}
+             :wallet                              wallet.db/default-wallet
              :wallet/all-tokens                  {}
              :prices                             {}
              :peers-count                        0
              :node-info                          {}
              :peers-summary                      []
-             :notifications                      {}
-             :semaphores                         #{}
-             :network                            constants/default-network
-             :networks/networks                  constants/default-networks
              :my-profile/editing?                false
-             :transport/chats                    {}
              :transport/filters                  {}
              :transport/message-envelopes        {}
              :mailserver/mailservers             (fleet/default-mailservers {})
@@ -58,18 +49,16 @@
              :initial-props                      {}
              :desktop/desktop                    {:tab-view-id :home}
              :dimensions/window                  (dimensions/window)
-             :push-notifications/stored          {}
              :registry                           {}
              :stickers/packs-owned               #{}
-             :stickers/packs-pendning            #{}
-             :hardwallet                         {:nfc-supported? false
-                                                  :nfc-enabled?   false
+             :stickers/packs-pending            #{}
+             :hardwallet                         {:nfc-enabled?   false
                                                   :pin            {:original     []
                                                                    :confirmation []
                                                                    :current      []
                                                                    :puk          []
                                                                    :enter-step   :original}}
-             :chats/loading?                     true})
+             :two-pane-ui-enabled?               (dimensions/fit-two-pane?)})
 
 ;;;;GLOBAL
 
@@ -81,27 +70,23 @@
 (spec/def ::web3-node-version (spec/nilable string?))
 ;;object?
 (spec/def ::webview-bridge (spec/nilable any?))
-(spec/def :node/status (spec/nilable #{:stopped :starting :started :stopping}))
-(spec/def :node/node-restart? (spec/nilable boolean?))
-(spec/def :node/address (spec/nilable string?))
 
 ;;height of native keyboard if shown
 (spec/def ::keyboard-height (spec/nilable number?))
 (spec/def ::keyboard-max-height (spec/nilable number?))
-(spec/def ::tab-bar-visible? (spec/nilable boolean?))
 ;;:online - presence of internet connection in the phone
 (spec/def ::network-status (spec/nilable keyword?))
+;; ui connectivity status
+(spec/def :connectivity/ui-status-properties (spec/nilable map?))
 
 (spec/def ::app-state string?)
+(spec/def ::app-in-background-since (spec/nilable number?))
+(spec/def ::app-active-since (spec/nilable number?))
 
 ;;;;NODE
 
 (spec/def ::sync-state (spec/nilable #{:pending :in-progress :synced :done :offline}))
 (spec/def ::sync-data (spec/nilable map?))
-
-;; contents of eth_syncing or `nil` if the node isn't syncing now
-(spec/def :node/chain-sync-state (spec/nilable map?))
-(spec/def :node/latest-block-number (spec/nilable number?))
 
 ;;;;NAVIGATION
 
@@ -134,7 +119,6 @@
 
 (spec/def :navigation.screen-params/collectibles-list map?)
 
-(spec/def :navigation.screen-params/show-extension map?)
 (spec/def :navigation.screen-params/selection-modal-screen map?)
 (spec/def :navigation.screen-params/manage-dapps-permissions map?)
 
@@ -145,13 +129,13 @@
                                                                       :navigation.screen-params/group-contacts
                                                                       :navigation.screen-params/edit-contact-group
                                                                       :navigation.screen-params/collectibles-list
-                                                                      :navigation.screen-params/show-extension
                                                                       :navigation.screen-params/selection-modal-screen
                                                                       :navigation.screen-params/manage-dapps-permissions])))
 
 (spec/def :desktop/desktop (spec/nilable any?))
 (spec/def ::tooltips (spec/nilable any?))
 (spec/def ::initial-props (spec/nilable any?))
+(spec/def ::two-pane-ui-enabled? (spec/nilable boolean?))
 
 ;;;;NETWORK
 
@@ -164,18 +148,13 @@
 (spec/def ::collectible (spec/nilable map?))
 (spec/def ::collectibles (spec/nilable map?))
 
-(spec/def ::extension-url (spec/nilable string?))
-(spec/def :extensions/staged-extension (spec/nilable any?))
-(spec/def :extensions/manage (spec/nilable any?))
-(spec/def ::extensions-store (spec/nilable any?))
-
 ;;;;NODE
 
 (spec/def ::message-envelopes (spec/nilable map?))
 
-;;;;UUID
+;;;; Supported Biometric authentication types
 
-(spec/def ::device-UUID (spec/nilable string?))
+(spec/def ::supported-biometric-auth (spec/nilable #{:FaceID :TouchID :fingerprint}))
 
 ;;;;UNIVERSAL LINKS
 
@@ -184,23 +163,27 @@
 ;; DIMENSIONS
 (spec/def :dimensions/window map?)
 
-;; PUSH NOTIFICATIONS
-(spec/def :push-notifications/stored (spec/nilable map?))
-
-(spec/def ::semaphores set?)
-
 (spec/def ::hardwallet (spec/nilable map?))
 
 (spec/def :stickers/packs (spec/nilable map?))
 (spec/def :stickers/packs-owned (spec/nilable set?))
-(spec/def :stickers/packs-pendning (spec/nilable set?))
+(spec/def :stickers/packs-pending (spec/nilable set?))
 (spec/def :stickers/packs-installed (spec/nilable map?))
 (spec/def :stickers/selected-pack (spec/nilable any?))
 (spec/def :stickers/recent (spec/nilable vector?))
-(spec/def :extensions/profile (spec/nilable any?))
+(spec/def :wallet/custom-token-screen (spec/nilable map?))
+
+(spec/def :signing/in-progress? (spec/nilable boolean?))
+(spec/def :signing/queue (spec/nilable any?))
+(spec/def :signing/tx (spec/nilable map?))
+(spec/def :signing/sign (spec/nilable map?))
+(spec/def :signing/edit-fee (spec/nilable map?))
+
+(spec/def :popover/popover (spec/nilable map?))
+
+(spec/def :wallet/prepare-transaction (spec/nilable map?))
 
 (spec/def ::db (spec/keys :opt [:contacts/contacts
-                                :contacts/dapps
                                 :contacts/new-identity
                                 :contacts/new-identity-error
                                 :contacts/identity
@@ -210,13 +193,11 @@
                                 :contacts/click-action
                                 :contacts/click-params
                                 :pairing/installations
-                                :commands/stored-command
                                 :group/selected-contacts
-                                :accounts/accounts
-                                :accounts/create
-                                :accounts/recover
-                                :accounts/login
-                                :account/account
+                                :multiaccounts/multiaccounts
+                                :multiaccounts/recover
+                                :multiaccounts/login
+                                :multiaccount/accounts
                                 :my-profile/profile
                                 :my-profile/default-name
                                 :my-profile/editing?
@@ -228,25 +209,15 @@
                                 :networks/networks
                                 :networks/manage
                                 :bootnodes/manage
-                                :extensions/staged-extension
-                                :extensions/manage
-                                :node/status
-                                :node/restart?
-                                :node/address
-                                :node/chain-sync-state
-                                :node/latest-block-number
                                 :universal-links/url
-                                :push-notifications/stored
                                 :browser/browsers
                                 :browser/options
-                                :new/open-dapp
                                 :navigation/screen-params
                                 :chat/cooldowns
                                 :chat/cooldown-enabled?
                                 :chat/last-outgoing-message-sent-at
                                 :chat/spam-messages-frequency
                                 :transport/message-envelopes
-                                :transport/chats
                                 :transport/filters
                                 :mailserver.edit/mailserver
                                 :mailserver/mailservers
@@ -271,10 +242,19 @@
                                 :stickers/selected-pack
                                 :stickers/recent
                                 :stickers/packs-owned
-                                :stickers/packs-pendning
+                                :stickers/packs-pending
                                 :bottom-sheet/show?
                                 :bottom-sheet/view
-                                :extensions/profile]
+                                :bottom-sheet/options
+                                :wallet/custom-token-screen
+                                :wallet/prepare-transaction
+                                :signing/in-progress?
+                                :signing/queue
+                                :signing/sign
+                                :signing/tx
+                                :signing/edit-fee
+                                :popover/popover
+                                :wallet/sign-phrase-showed?]
                           :opt-un [::modal
                                    ::was-modal?
                                    ::rpc-url
@@ -285,7 +265,6 @@
                                    ::webview-bridge
                                    ::keyboard-height
                                    ::keyboard-max-height
-                                   ::tab-bar-visible?
                                    ::network-status
                                    ::peers-count
                                    ::node-info
@@ -295,15 +274,15 @@
                                    ::network
                                    ::chain
                                    ::app-state
-                                   ::semaphores
+                                   ::app-in-background-since
+                                   ::app-active-since
                                    ::hardwallet
+                                   ::auth-method
+                                   :multiaccount/multiaccount
                                    :navigation/view-id
                                    :navigation/navigation-stack
                                    :navigation/prev-tab-view-id
                                    :navigation/prev-view-id
-                                   :qr/qr-codes
-                                   :qr/qr-modal
-                                   :qr/current-qr-context
                                    :chat/chats
                                    :chat/current-chat-id
                                    :chat/chat-id
@@ -319,22 +298,18 @@
                                    :chat/public-group-topic
                                    :chat/public-group-topic-error
                                    :chat/messages
-                                   :chat/message-groups
                                    :chat/message-statuses
-                                   :chat/referenced-messages
                                    :chat/last-clock-value
                                    :chat/loaded-chats
                                    :chat/bot-db
-                                   :chat/id->command
-                                   :chat/access-scope->command-id
+                                   :connectivity/ui-status-properties
+                                   :ens/registration
                                    :wallet/wallet
-                                   :wallet/wallet.transactions
-                                   :wallet/wallet-selected-asset
                                    :prices/prices
                                    :prices/prices-loading?
-                                   :notifications/notifications
-                                   ::device-UUID
+                                   ::supported-biometric-auth
                                    ::collectible
                                    ::collectibles
-                                   ::extensions-store
-                                   :registry/registry]))
+                                   :registry/registry
+                                   ::two-pane-ui-enabled?
+                                   ::add-account]))

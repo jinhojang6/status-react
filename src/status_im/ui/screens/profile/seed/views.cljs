@@ -1,7 +1,6 @@
 (ns status-im.ui.screens.profile.seed.views
   (:require-macros [status-im.utils.views :refer [defview letsubs]])
   (:require [status-im.ui.components.react :as react]
-            [status-im.ui.components.status-bar.view :as status-bar]
             [status-im.ui.components.toolbar.view :as toolbar]
             [status-im.ui.components.toolbar.actions :as actions]
             [status-im.ui.components.colors :as colors]
@@ -40,7 +39,7 @@
                       :content-container-style {:align-items     :center
                                                 :justify-content :center}}
    (when-not platform/desktop?
-     [react/image {:source (:lock resources/ui)
+     [react/image {:source (resources/get-image :lock)
                    :style styles/intro-image}])
    [react/i18n-text {:style styles/intro-text
                      :key   :your-data-belongs-to-you}]
@@ -89,6 +88,8 @@
      {:placeholder       (i18n/label :t/enter-word)
       :ref               (partial reset! ref)
       :auto-focus        true
+      :auto-correct      false
+      :keyboard-type     "visible-password"
       :on-change-text    #(re-frame/dispatch [:set-in [:my-profile/seed :word] %])
       :on-submit-editing next-handler
       :error             error}]))
@@ -140,10 +141,9 @@
                               :label        (i18n/label :t/ok-got-it)}]])
 
 (defview backup-seed []
-  (letsubs [current-account [:account/account]
+  (letsubs [current-multiaccount [:multiaccount]
             {:keys [step first-word second-word error word]} [:my-profile/recovery]]
     [react/keyboard-avoiding-view {:style {:flex 1}}
-     [status-bar/status-bar]
      [toolbar/toolbar
       nil
       (when-not (= :finish step)
@@ -155,7 +155,7 @@
         (i18n/label :t/step-i-of-n {:step (steps-numbers step) :number 3})]]]
      (case step
        :intro [intro]
-       :12-words [twelve-words current-account]
+       :12-words [twelve-words current-multiaccount]
        :first-word [enter-word step first-word error word]
        :second-word [enter-word step second-word error word]
        :finish [finish])]))

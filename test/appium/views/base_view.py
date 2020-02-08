@@ -1,18 +1,21 @@
-import random
-import string
 import time
+
 import base64
 import pytest
+import random
 import re
+import string
 import zbarlight
-from tests import common_password
-from eth_keys import datatypes
-from selenium.common.exceptions import NoSuchElementException, TimeoutException, StaleElementReferenceException
 from PIL import Image
+from appium.webdriver.common.touch_action import TouchAction
 from datetime import datetime
+from eth_keys import datatypes
 from io import BytesIO
-from views.base_element import BaseButton, BaseElement, BaseEditBox, BaseText
+from selenium.common.exceptions import NoSuchElementException, TimeoutException, StaleElementReferenceException
+
 from support.device_apps import start_web_browser
+from tests import common_password
+from views.base_element import BaseButton, BaseElement, BaseEditBox, BaseText
 
 
 class BackButton(BaseButton):
@@ -32,9 +35,9 @@ class AllowButton(BaseButton):
         super(AllowButton, self).__init__(driver)
         self.locator = self.Locator.xpath_selector("//*[@text='Allow' or @text='ALLOW']")
 
-    def click(self):
+    def click(self, times_to_click=3):
         try:
-            for _ in range(3):
+            for _ in range(times_to_click):
                 self.find_element().click()
                 self.driver.info('Tap on %s' % self.name)
         except NoSuchElementException:
@@ -131,12 +134,9 @@ class WalletButton(TabButton):
 
     def click(self):
         self.driver.info('Tap on %s' % self.name)
-        from views.wallet_view import SetUpButton, SendTransactionButton
-        for _ in range(3):
-            self.find_element().click()
-            if SetUpButton(self.driver).is_element_displayed() or SendTransactionButton(
-                    self.driver).is_element_displayed():
-                return self.navigate()
+        from views.wallet_view import MultiaccountMoreOptions
+        self.click_until_presence_of_element(MultiaccountMoreOptions(self.driver))
+        return self.navigate()
 
 
 class ProfileButton(TabButton):
@@ -149,8 +149,8 @@ class ProfileButton(TabButton):
         return ProfileView(self.driver)
 
     def click(self):
-        from views.profile_view import ShareMyProfileButton
-        self.click_until_presence_of_element(ShareMyProfileButton(self.driver))
+        from views.profile_view import PrivacyAndSecurityButton
+        self.click_until_presence_of_element(PrivacyAndSecurityButton(self.driver))
         return self.navigate()
 
 
@@ -243,6 +243,18 @@ class CrossIcon(BaseButton):
         self.locator = self.Locator.xpath_selector('(//android.view.ViewGroup[@content-desc="icon"])[1]')
 
 
+class NativeCloseButton(BaseButton):
+    def __init__(self, driver):
+        super(NativeCloseButton, self).__init__(driver)
+        self.locator = self.Locator.id('android:id/aerr_close')
+
+
+class CrossIconInWelcomeScreen(BaseButton):
+    def __init__(self, driver):
+        super(CrossIconInWelcomeScreen, self).__init__(driver)
+        self.locator = self.Locator.accessibility_id('hide-home-button')
+
+
 class ShowRoots(BaseButton):
 
     def __init__(self, driver):
@@ -261,7 +273,7 @@ class AssetButton(BaseButton):
     def __init__(self, driver, asset_name):
         super(AssetButton, self).__init__(driver)
         self.asset_name = asset_name
-        self.locator = self.Locator.text_selector(self.asset_name)
+        self.locator = self.Locator.xpath_selector('(//*[@content-desc=":' + self.asset_name + '-asset-value"])[2]')
 
     @property
     def name(self):
@@ -279,11 +291,32 @@ class OpenInStatusButton(BaseButton):
 
     def click(self):
         self.wait_for_visibility_of_element()
-        
-        # 'Open in Status' button already in DOM but need to scroll down so that click action works
-        self.driver.swipe(500, 1000, 500, 100)
-        self.driver.info('Tap on %s' % self.name)
+        # using sleep is wrong, but implicit wait for element can't help in particular case
+        time.sleep(3)
+        self.swipe_to_web_element()
         self.wait_for_element().click()
+
+
+class OkGotItButton(BaseButton):
+    def __init__(self,driver):
+        super(OkGotItButton, self).__init__(driver)
+        self.locator = self.Locator.xpath_selector("//*[@text='Okay, got it']")
+
+    def click(self):
+        self.wait_for_element().click()
+        self.wait_for_invisibility_of_element()
+
+
+class AirplaneModeButton(BaseButton):
+    def __init__(self, driver):
+        super(AirplaneModeButton, self).__init__(driver)
+        self.locator = self.Locator.xpath_selector("//*[@content-desc='Airplane mode']")
+
+    def click(self):
+        action = TouchAction(self.driver)
+        action.press(None, 50, 0).move_to(None, 50, 300).perform()
+        super(AirplaneModeButton, self).click()
+        self.driver.press_keycode(4)
 
 
 class BaseView(object):
@@ -312,14 +345,20 @@ class BaseView(object):
         self.confirm_button = ConfirmButton(self.driver)
         self.connection_status = ConnectionStatusText(self.driver)
         self.cross_icon = CrossIcon(self.driver)
+        self.native_close_button = NativeCloseButton(self.driver)
         self.show_roots_button = ShowRoots(self.driver)
         self.get_started_button = GetStartedButton(self.driver)
+        self.ok_got_it_button = OkGotItButton(self.driver)
+        self.progress_bar = ProgressBar(self.driver)
+        self.cross_icon_iside_welcome_screen_button = CrossIconInWelcomeScreen(self.driver)
 
         # external browser
         self.open_in_status_button = OpenInStatusButton(self.driver)
 
         self.apps_button = AppsButton(self.driver)
         self.status_app_icon = StatusAppIcon(self.driver)
+
+        self.airplane_mode_button = AirplaneModeButton(self.driver)
 
         self.element_types = {
             'base': BaseElement,
@@ -330,9 +369,10 @@ class BaseView(object):
 
     def accept_agreements(self):
         iterations = int()
-        from views.sign_in_view import CreateAccountButton, PasswordInput
-        while iterations <= 3 and not (CreateAccountButton(self.driver).is_element_displayed(2) or PasswordInput(
-                self.driver).is_element_displayed(2)):
+        self.close_native_device_dialog("Messages")
+        self.close_native_device_dialog("YouTube")
+        while iterations <= 1 and (self.ok_button.is_element_displayed(2) or
+                                   self.continue_button.is_element_displayed(2)):
             for button in self.ok_button, self.continue_button:
                 try:
                     button.wait_for_element(3)
@@ -340,6 +380,17 @@ class BaseView(object):
                 except (NoSuchElementException, TimeoutException):
                     pass
             iterations += 1
+
+    def close_native_device_dialog(self, alert_text_part):
+        element = self.element_by_text_part(alert_text_part)
+        if element.is_element_present(1):
+            self.driver.info("Closing '%s' alert..." % alert_text_part)
+            self.dismiss_alert()
+
+    def dismiss_alert(self):
+        self.native_close_button.click()
+        self.driver.info("Alert closed")
+
 
     @property
     def logcat(self):
@@ -363,9 +414,14 @@ class BaseView(object):
             except TimeoutException:
                 counter += 1
 
-    def click_system_back_button(self):
+    def just_fyi(self, string):
+        self.driver.info('=========================================================================')
+        self.driver.info(string)
+
+    def click_system_back_button(self, times=1):
         self.driver.info('Click system back button')
-        self.driver.press_keycode(4)
+        for _ in range(times):
+            self.driver.press_keycode(4)
 
     def cut_text(self):
         self.driver.info('Cut text')
@@ -447,8 +503,21 @@ class BaseView(object):
         element.locator = element.Locator.xpath_selector(xpath)
         return element
 
+    def swipe_up(self):
+        size = self.driver.get_window_size()
+        self.driver.swipe(size["width"]*0.5, size["height"]*0.8, size["width"]*0.5, size["height"]*0.2)
+
     def swipe_down(self):
-        self.driver.swipe(500, 500, 500, 1000)
+        size = self.driver.get_window_size()
+        self.driver.swipe(size["width"]*0.5, size["height"]*0.2, size["width"]*0.5, size["height"]*0.8)
+
+    def swipe_left(self):
+        size = self.driver.get_window_size()
+        self.driver.swipe(size["width"]*0.8, size["height"]*0.8, size["width"]*0.2, size["height"]*0.8)
+
+    def swipe_right(self):
+        size = self.driver.get_window_size()
+        self.driver.swipe(size["width"]*0.2, size["height"]*0.8, size["width"]*0.8, size["height"]*0.8)
 
     def get_status_test_dapp_view(self):
         from views.web_views.status_test_dapp import StatusTestDAppView
@@ -484,7 +553,7 @@ class BaseView(object):
 
     @staticmethod
     def get_unique_amount():
-        return '0.0%s' % datetime.now().strftime('%-m%-d%-H%-M%-S').strip('0')
+        return '0.00%s' % datetime.now().strftime('%-d%-H%-M%-S').strip('0')
 
     @staticmethod
     def get_public_chat_name():
@@ -502,12 +571,12 @@ class BaseView(object):
         raw_public_key = bytearray.fromhex(public_key.replace('0x04', ''))
         return datatypes.PublicKey(raw_public_key).to_address()[2:]
 
-    def get_back_to_home_view(self):
+    def get_back_to_home_view(self, times_to_click_on_back_btn=5):
         counter = 0
         from views.home_view import PlusButton
         while not PlusButton(self.driver).is_element_displayed(2):
             try:
-                if counter >= 5:
+                if counter >= times_to_click_on_back_btn:
                     break
                 self.back_button.click()
             except (NoSuchElementException, TimeoutException):
@@ -524,12 +593,15 @@ class BaseView(object):
         sign_in_view = self.get_sign_in_view()
         sign_in_view.sign_in(password)
 
+    def close_share_popup(self):
+        TouchAction(self.driver).tap(None, 255, 104, 1).perform()
+
     def get_public_key(self):
         profile_view = self.profile_button.click()
         profile_view.share_my_profile_button.click()
         profile_view.public_key_text.wait_for_visibility_of_element()
         public_key = profile_view.public_key_text.text
-        profile_view.cross_icon.click()
+        self.close_share_popup()
         return public_key
 
     def share_via_messenger(self):
@@ -554,29 +626,32 @@ class BaseView(object):
                             e.msg = "Device %s: Can't reconnect to mail server after 3 attempts" % self.driver.number
                             raise e
 
-    def check_no_values_in_logcat(self, **kwargs):
+    def find_values_in_logcat(self, **kwargs):
         logcat = self.logcat
+        items_in_logcat = list()
         for key, value in kwargs.items():
-            if re.findall('\W%s$|\W%s\W' % (value, value), logcat):
-                pytest.fail('%s in logcat!!!' % key.capitalize(), pytrace=False)
+            if re.findall(r'\W%s$|\W%s\W' % (value, value), logcat):
+                items_in_logcat.append('%s in logcat!!!' % key.capitalize())
+        return items_in_logcat
 
     def asset_by_name(self, asset_name):
         return AssetButton(self.driver, asset_name)
 
     def toggle_airplane_mode(self):
-        # opening android settings
+        self.airplane_mode_button.click()
+        self.close_native_device_dialog("MmsService")
+
+    def toggle_mobile_data(self):
         self.driver.start_activity(app_package='com.android.settings', app_activity='.Settings')
         network_and_internet = self.element_by_text('Network & Internet')
         network_and_internet.wait_for_visibility_of_element()
         network_and_internet.click()
-        airplane_toggle = self.element_by_xpath('//*[@resource-id="android:id/switch_widget"]')
-        airplane_toggle.wait_for_visibility_of_element()
-        airplane_toggle.click()
-        # opening Status app
-        app_package, app_activity = 'im.status.ethereum', '.MainActivity'
-        if pytest.config.getoption('pr_number'):
-            app_package, app_activity = 'im.status.ethereum.pr', 'im.status.ethereum.MainActivity'
-        self.driver.start_activity(app_package=app_package, app_activity=app_activity)
+        toggle = self.element_by_accessibility_id('Wi‑Fi')
+        toggle.wait_for_visibility_of_element()
+        toggle.click()
+        self.driver.back()
+        self.driver.back()
+
 
     def open_universal_web_link(self, deep_link):
         start_web_browser(self.driver)

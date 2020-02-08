@@ -1,8 +1,5 @@
 (ns status-im.ui.screens.profile.user.styles
-  (:require-macros [status-im.utils.styles :refer [defstyle]])
-  (:require [status-im.ui.components.colors :as colors]
-            [status-im.ui.screens.profile.components.styles :as profile.components.styles]
-            [status-im.ui.components.styles :as components.styles]))
+  (:require [status-im.ui.components.colors :as colors]))
 
 (def share-contact-code-container
   {:flex-direction  :row
@@ -21,25 +18,7 @@
 
 (def share-link-button
   {:margin-top    12
-   :margin-bottom 16})
-
-(defstyle my-profile-info-container {})
-
-(defstyle my-profile-settings-logout-wrapper
-  {:flex-direction  :row
-   :justify-content :space-between
-   :align-items     :center})
-
-(defstyle my-profile-settings-logout
-  {:min-width       "50%"})
-
-(defstyle my-profile-settings-send-logs-wrapper
-  {:flex-direction  :row
-   :justify-content :space-between
-   :align-items     :center})
-
-(defstyle my-profile-settings-send-logs
-  {:min-width       "50%"})
+   :margin-bottom 8})
 
 (def advanced-button
   {:margin-top    16
@@ -54,7 +33,7 @@
    :padding-right    12
    :padding-vertical 6
    :border-radius    18
-   :background-color (colors/alpha colors/blue 0.1)})
+   :background-color colors/blue-transparent-10})
 
 (def advanced-button-row
   {:flex-direction :row

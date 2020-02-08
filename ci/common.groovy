@@ -1,10 +1,10 @@
 import groovy.json.JsonBuilder
 
-gh = load 'ci/github.groovy'
+/* Libraries -----------------------------------------------------------------*/
+
 ci = load 'ci/jenkins.groovy'
-gh = load 'ci/github.groovy'
+nix = load 'ci/nix.groovy'
 utils = load 'ci/utils.groovy'
-ghcmgr = load 'ci/ghcmgr.groovy'
 
 /* Small Helpers -------------------------------------------------------------*/
 
@@ -26,55 +26,75 @@ def updateBucketJSON(urls, fileName) {
   def contentJson = new JsonBuilder(content).toPrettyString()
   println "${fileName}:\n${contentJson}"
   new File(filePath).write(contentJson)
-  return utils.uploadArtifact(filePath)
-}
-
-def notifyPR(success) {
-  if (utils.changeId() == null) { return }
-  try {
-    ghcmgr.postBuild(success)
-  } catch (ex) { /* fallback to posting directly to GitHub */
-    println "Failed to use GHCMGR: ${ex}"
-    switch (success) {
-      case true:  gh.NotifyPRSuccess(); break
-      case false: gh.NotifyPRFailure(); break
-    }
-  }
-}
-
-def prepNixEnvironment() {
-  if (env.TARGET_OS == 'linux' || env.TARGET_OS == 'windows' || env.TARGET_OS == 'android') {
-    def glibcLocales = sh(
-      returnStdout: true,
-      script: ". ~/.nix-profile/etc/profile.d/nix.sh && nix-build --no-out-link '<nixpkgs>' -A glibcLocales"
-    ).trim()
-    env.LOCALE_ARCHIVE_2_27 = "${glibcLocales}/lib/locale/locale-archive"
-  }
+  return uploadArtifact(filePath)
 }
 
 def prep(type = 'nightly') {
   /* build/downloads all nix deps in advance */
-  prepNixEnvironment()
+  nix.prepEnv()
   /* rebase unless this is a release build */
   utils.doGitRebase()
   /* ensure that we start from a known state */
   sh 'make clean'
+  /* Disable git hooks in CI, it's not useful, takes time and creates weird errors at times
+     (e.g. bin/sh: 2: /etc/ssl/certs/ca-certificates.crt: Permission denied) */
+  sh 'make disable-githooks'
+
   /* pick right .env and update from params */
   utils.updateEnv(type)
 
-  if (env.TARGET_OS == 'android' || env.TARGET_OS == 'ios') {
+  if (['android', 'ios'].contains(env.TARGET)) {
     /* Run at start to void mismatched numbers */
     utils.genBuildNumber()
-    /* install ruby dependencies */
-    utils.nix_sh 'bundle install --quiet'
   }
 
-  def prepareTarget=env.TARGET_OS
-  if (env.TARGET_OS == 'macos' || env.TARGET_OS == 'linux' || env.TARGET_OS == 'windows') {
-    prepareTarget='desktop'
+  nix.shell('watchman watch-del-all', attr: 'shells.watchman')
+
+  if (env.TARGET == 'ios') {
+    /* install ruby dependencies */
+    nix.shell(
+      'bundle install --gemfile=fastlane/Gemfile --quiet',
+      attr: 'shells.fastlane')
   }
-  /* node deps, pods, and status-go download */
-  utils.nix_sh "scripts/prepare-for-platform.sh ${prepareTarget}"
+
+  if (['macos', 'linux', 'windows'].contains(env.TARGET)) {
+    /* node deps, pods, and status-go download */
+    nix.shell('scripts/prepare-for-desktop-platform.sh', pure: false)
+  }
+  /* run script in the nix shell so that node_modules gets instantiated before attempting the copies */
+  nix.shell('scripts/copy-translations.sh chmod', attr: "shells.${env.TARGET}")
+}
+
+def uploadArtifact(path) {
+  /* defaults for upload */
+  def domain = 'ams3.digitaloceanspaces.com'
+  def bucket = 'status-im'
+  /* There's so many PR builds we need a separate bucket */
+  if (utils.isPRBuild()) {
+    bucket = 'status-im-prs'
+  }
+  /* WARNING: s3cmd can't guess APK MIME content-type */
+  def customOpts = ''
+  if (path.endsWith('apk')) {
+    customOpts += "--mime-type='application/vnd.android.package-archive'"
+  }
+  /* We also need credentials for the upload */
+  withCredentials([usernamePassword(
+    credentialsId: 'digital-ocean-access-keys',
+    usernameVariable: 'DO_ACCESS_KEY',
+    passwordVariable: 'DO_SECRET_KEY'
+  )]) {
+    sh("""
+      s3cmd ${customOpts} \\
+        --acl-public \\
+        --host="${domain}" \\
+        --host-bucket="%(bucket)s.${domain}" \\
+        --access_key=${DO_ACCESS_KEY} \\
+        --secret_key=${DO_SECRET_KEY} \\
+        put ${path} s3://${bucket}/
+    """)
+  }
+  return "https://${bucket}.${domain}/${utils.getFilename(path)}"
 }
 
 return this

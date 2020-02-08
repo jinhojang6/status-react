@@ -1,6 +1,8 @@
 (ns status-im.ui.screens.profile.components.views
   (:require [clojure.string :as string]
             [re-frame.core :as re-frame]
+            [status-im.multiaccounts.core :as multiaccounts]
+            [status-im.ethereum.stateofus :as stateofus]
             [status-im.i18n :as i18n]
             [status-im.ui.components.chat-icon.screen :as chat-icon.screen]
             [status-im.ui.components.colors :as colors]
@@ -9,6 +11,7 @@
             [status-im.ui.components.react :as react]
             [status-im.utils.gfycat.core :as gfy]
             [status-im.ui.components.list-selection :as list-selection]
+            [status-im.ui.screens.profile.user.sheet.views :as sheets]
             [status-im.ui.screens.profile.components.styles :as styles]))
 
 ;; profile header elements
@@ -25,42 +28,78 @@
             :accessibility-label :username-input}
            props)]])
 
-(defn- show-profile-icon-actions [options]
-  (when (seq options)
-    (list-selection/show {:title   (i18n/label :t/image-source-title)
-                          :options options})))
+(defn- names [{:keys [usernames name public-key] :as contact}]
+  (let [generated-name (when public-key (gfy/generate-gfy public-key))
+        with-subtitle? (seq usernames)]
+    [react/view (if with-subtitle? styles/profile-header-name-container-with-subtitle
+                    styles/profile-header-name-container)
+     [react/text {:style (if with-subtitle? styles/profile-name-text-with-subtitle
+                             styles/profile-name-text)
+                  :number-of-lines 2
+                  :ellipsize-mode  :tail}
 
-(defn- profile-header-display [{:keys [name public-key] :as contact}]
-  (let [generated-name (when public-key (gfy/generate-gfy public-key))]
-    [react/view styles/profile-header-display
-     [chat-icon.screen/my-profile-icon {:account contact
-                                        :edit?   false}]
-     [react/view styles/profile-header-name-container
-      [react/text {:style           styles/profile-name-text
-                   :number-of-lines 1}
-       name]
-      (when (and public-key (not= generated-name name))
-        [react/text {:style           styles/profile-three-words
-                     :number-of-lines 1}
-         generated-name])]]))
+      (multiaccounts/displayed-name contact)]
+     (when with-subtitle?
+       [react/text {:style           styles/profile-three-words
+                    :number-of-lines 1}
+        generated-name])]))
 
-(defn- profile-header-edit [{:keys [name group-chat] :as contact}
-                            icon-options on-change-text-event allow-icon-change?]
-  [react/view styles/profile-header-edit
-   [react/touchable-highlight {:on-press            #(show-profile-icon-actions icon-options)
-                               :accessibility-label :edit-profile-photo-button}
-    [react/view styles/modal-menu
-     [chat-icon.screen/my-profile-icon {:account contact
-                                        :edit?   allow-icon-change?}]]]
-   [react/view styles/profile-header-name-container
-    [profile-name-input name on-change-text-event
-     (when group-chat {:accessibility-label :chat-name-input})]]])
+(defn- group-name [name]
+  [react/view styles/profile-header-name-container
+   [react/text {:style styles/profile-name-text
+                :number-of-lines 2
+                :ellipsize-mode  :tail}
+    name]])
+
+(defn- profile-header-display [{:keys [name public-key] :as contact}
+                               allow-icon-change? include-remove-action?]
+  [react/view (merge styles/profile-header-display {:padding-horizontal 16})
+   (if allow-icon-change?
+     [react/view {:align-items     :center
+                  :align-self      :stretch
+                  :justify-content :center}
+      [react/touchable-highlight
+       {:accessibility-label :edit-profile-photo-button
+        :on-press
+        #(re-frame/dispatch
+          [:bottom-sheet/show-sheet
+           {:content        (sheets/profile-icon-actions include-remove-action?)
+            :content-height (if include-remove-action? 192 128)}])}
+       [react/view
+        [react/view {:background-color colors/white
+                     :border-radius    15
+                     :width            30
+                     :height           30
+                     :justify-content  :center
+                     :align-items      :center
+                     :position         :absolute
+                     :z-index          1
+                     :top              -5
+                     :right            -5}
+         [react/view {:background-color colors/blue
+                      :border-radius    12
+                      :width            24
+                      :height           24
+                      :justify-content  :center
+                      :align-items      :center}
+          [vector-icons/icon :tiny-edit {:color  colors/white
+                                         :width  16
+                                         :height 16}]]]
+        [chat-icon.screen/my-profile-icon {:multiaccount contact
+                                           :edit?        false}]]]]
+     ;; else
+     [chat-icon.screen/my-profile-icon {:multiaccount contact
+                                        :edit?        false}])
+   [names contact]])
+
+(defn group-header-display [{:keys [chat-name color]}]
+  [react/view (merge styles/profile-header-display {:padding-horizontal 16})
+   [chat-icon.screen/profile-icon-view nil chat-name color nil 64 nil]
+   [group-name chat-name]])
 
 (defn profile-header
-  [{:keys [contact edited-contact editing? allow-icon-change? options on-change-text-event]}]
-  (if editing?
-    [profile-header-edit (or edited-contact contact) options on-change-text-event allow-icon-change?]
-    [profile-header-display contact]))
+  [{:keys [contact allow-icon-change? include-remove-action?]}]
+  [profile-header-display contact allow-icon-change? include-remove-action?])
 
 ;; settings items elements
 
@@ -101,7 +140,7 @@
     (if icon-content
       icon-content
       (when (and active? (not hide-arrow?))
-        [vector-icons/icon :main-icons/next {:color colors/gray}]))]])
+        [vector-icons/icon :main-icons/next {:color colors/gray-transparent-40}]))]])
 
 (defn settings-switch-item
   [{:keys [label-kw value action-fn active?]
@@ -109,7 +148,7 @@
   [react/view styles/settings-item
    [react/view styles/settings-item-text-wrapper
     [react/i18n-text {:style styles/settings-item-text :key label-kw}]]
-   [react/switch {:on-tint-color   colors/blue
+   [react/switch {:track-color     #js {:true colors/blue :false nil}
                   :value           (boolean value)
                   :on-value-change action-fn
                   :disabled        (not active?)}]])

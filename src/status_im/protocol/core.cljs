@@ -1,83 +1,71 @@
 (ns status-im.protocol.core
-  (:require [re-frame.core :as re-frame]
-            [status-im.constants :as constants]
+  (:require [status-im.constants :as constants]
             [status-im.transport.core :as transport]
-            [status-im.mailserver.core :as mailserver]
-            [status-im.utils.ethereum.core :as ethereum]
-            [status-im.utils.fx :as fx]
-            [status-im.utils.semaphores :as semaphores]
-            [status-im.utils.utils :as utils]
-            [status-im.i18n :as i18n]))
+            [status-im.utils.fx :as fx]))
 
-(fx/defn update-sync-state
-  [{{:keys [sync-state sync-data] :as db} :db} error sync]
-  (let [{:keys [highestBlock currentBlock] :as state}
-        (js->clj sync :keywordize-keys true)
-        syncing?  (> (- highestBlock currentBlock) constants/blocks-per-hour)
-        new-state (cond
-                    error :offline
-                    syncing? (if (= sync-state :done)
-                               :pending
-                               :in-progress)
-                    :else (if (or (= sync-state :done)
-                                  (= sync-state :pending))
-                            :done
-                            :synced))]
-    {:db (cond-> db
-           (and (not= sync-data state) (= :in-progress new-state))
-           (assoc :sync-data state)
-           (not= sync-state new-state)
-           (assoc :sync-state new-state))}))
+(defn add-custom-mailservers
+  [db custom-mailservers]
+  (reduce (fn [db {:keys [fleet] :as mailserver}]
+            (let [{:keys [id] :as mailserver}
+                  (-> mailserver
+                      (update :id keyword)
+                      (dissoc :fleet)
+                      (assoc :user-defined true))]
+              (assoc-in db
+                        [:mailserver/mailservers (keyword fleet) id]
+                        mailserver)))
+          db
+          custom-mailservers))
 
-(fx/defn check-sync-state
-  [{{:keys [web3] :as db} :db :as cofx}]
-  (if (:account/account db)
-    {:web3/get-syncing      web3
-     :web3/get-block-number web3
-     :utils/dispatch-later  [{:ms       10000
-                              :dispatch [:protocol/state-sync-timed-out]}]}
-    (semaphores/free cofx :check-sync-state?)))
+(defn add-mailserver-topics
+  [db mailserver-topics]
+  (assoc db
+         :mailserver/topics
+         (reduce (fn [acc {:keys [topic chat-ids]
+                           :as mailserver-topic}]
+                   (assoc acc topic
+                          (update mailserver-topic :chat-ids
+                                  #(into #{} %))))
+                 {}
+                 mailserver-topics)))
 
-(fx/defn start-check-sync-state
-  [{{:keys [network account/account] :as db} :db :as cofx}]
-  (when (and (not (semaphores/locked? cofx :check-sync-state?))
-             (not (ethereum/network-with-upstream-rpc? (get-in account [:networks network]))))
-    (fx/merge cofx
-              (check-sync-state)
-              (semaphores/lock :check-sync-state?))))
+(defn add-mailserver-ranges
+  [db mailserver-ranges]
+  (assoc db
+         :mailserver/ranges
+         (reduce (fn [acc {:keys [chat-id] :as range}]
+                   (assoc acc chat-id range))
+                 {}
+                 mailserver-ranges)))
 
 (fx/defn initialize-protocol
-  [{:data-store/keys [transport mailserver-topics mailservers]
-    :keys [db web3] :as cofx}]
-  (let [network (get-in db [:account/account :network])
-        network-id (str (get-in db [:account/account :networks network :config :NetworkId]))]
+  {:events [::initialize-protocol]}
+  [{:keys [db] :as cofx}
+   {:keys [mailserver-ranges mailserver-topics mailservers] :as data}]
+  ;; NOTE: we need to wait for `:mailservers` `:mailserver-ranges` and
+  ;; `:mailserver-topics` before we can proceed to init whisper
+  ;; since those are populated by separate events, we check here
+  ;; that everything has been initialized before moving forward
+  (let [initialization-protocol (apply conj (get db :initialization-protocol #{})
+                                       (keys data))
+        initialization-complete? (= initialization-protocol
+                                    #{:mailservers
+                                      :mailserver-ranges
+                                      :mailserver-topics
+                                      :default-mailserver})]
     (fx/merge cofx
-              {:db                              (assoc db
-                                                       :rpc-url constants/ethereum-rpc-url
-                                                       :transport/chats transport
-                                                       :mailserver/topics mailserver-topics)
-               :protocol/assert-correct-network {:web3 web3
-                                                 :network-id network-id}}
-              (start-check-sync-state)
-              (mailserver/initialize-mailserver mailservers)
-              (transport/init-whisper))))
-
-(fx/defn handle-close-app-confirmed
-  [_]
-  {:ui/close-application nil})
-
-(re-frame/reg-fx
- :protocol/assert-correct-network
- (fn [{:keys [web3 network-id]}]
-   ;; ensure that node was started correctly
-   (when (and network-id web3) ; necessary because of the unit tests
-     (.getNetwork (.-version web3)
-                  (fn [error fetched-network-id]
-                    (when (and (not error) ; error most probably means we are offline
-                               (not= network-id fetched-network-id))
-                      (utils/show-popup
-                       (i18n/label :t/ethereum-node-started-incorrectly-title)
-                       (i18n/label :t/ethereum-node-started-incorrectly-description
-                                   {:network-id         network-id
-                                    :fetched-network-id fetched-network-id})
-                       #(re-frame/dispatch [:protocol.ui/close-app-confirmed]))))))))
+              {:db (cond-> db
+                     mailserver-ranges
+                     (add-mailserver-ranges mailserver-ranges)
+                     mailserver-topics
+                     (add-mailserver-topics mailserver-topics)
+                     mailservers
+                     (add-custom-mailservers mailservers)
+                     initialization-complete?
+                     (assoc :rpc-url constants/ethereum-rpc-url)
+                     initialization-complete?
+                     (dissoc :initialization-protocol)
+                     (not initialization-complete?)
+                     (assoc :initialization-protocol initialization-protocol))}
+              (when initialization-complete?
+                (transport/init-messenger)))))

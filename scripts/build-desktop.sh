@@ -10,48 +10,18 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 SCRIPTPATH="$( cd "$(dirname "$0")" ; pwd -P )"
 OS=$(uname -s)
-if [ -z "$TARGET_OS" ]; then
-  TARGET_OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+if [ -z "$TARGET" ]; then
+  TARGET=$(uname -s | tr '[:upper:]' '[:lower:]')
 fi
 WINDOWS_CROSSTOOLCHAIN_PKG_NAME='mxetoolchain-x86_64-w64-mingw32'
-
-external_modules_dir=( \
-  'node_modules/react-native-languages/desktop' \
-  'node_modules/react-native-config/desktop' \
-  'node_modules/react-native-fs/desktop' \
-  'node_modules/react-native-http-bridge/desktop' \
-  'node_modules/react-native-webview-bridge/desktop' \
-  'node_modules/react-native-keychain/desktop' \
-  'node_modules/react-native-securerandom/desktop' \
-  'modules/react-native-status/desktop' \
-  'node_modules/google-breakpad' \
-  'modules/react-native-desktop-linking/desktop' \
-  'modules/react-native-desktop-menu/desktop' \
-  'modules/react-native-desktop-config/desktop' \
-  'modules/react-native-desktop-shortcuts/desktop' \
-  'modules/react-native-desktop-notification/desktop' \
-)
-
-external_fonts=( \
-  '../../../../../resources/fonts/Inter-Bold.otf' \
-  '../../../../../resources/fonts/Inter-Medium.otf' \
-  '../../../../../resources/fonts/Inter-Regular.otf' \
-)
 
 source "$SCRIPTPATH/lib/setup/path-support.sh"
 
 source_lib "packages.sh"
-
-function is_macos() {
-  [[ "$OS" =~ Darwin ]]
-}
-
-function is_linux() {
-  [[ "$OS" =~ Linux ]]
-}
+source_lib "platform.sh"
 
 function is_windows_target() {
-  [[ "$TARGET_OS" =~ windows ]]
+  [[ "$TARGET" =~ windows ]]
 }
 
 function joinPath() {
@@ -79,17 +49,14 @@ if is_windows_target; then
   CMAKE_EXTRA_FLAGS="$CMAKE_EXTRA_FLAGS -DCMAKE_C_COMPILER='x86_64-w64-mingw32.shared-gcc'"
   CMAKE_EXTRA_FLAGS="$CMAKE_EXTRA_FLAGS -DCMAKE_CXX_COMPILER='x86_64-w64-mingw32.shared-g++'"
   CMAKE_EXTRA_FLAGS="$CMAKE_EXTRA_FLAGS -DCMAKE_RC_COMPILER='x86_64-w64-mingw32.shared-windres'"
-elif is_macos; then
-  CMAKE_EXTRA_FLAGS="$CMAKE_EXTRA_FLAGS -DCMAKE_C_COMPILER='gcc'"
-  CMAKE_EXTRA_FLAGS="$CMAKE_EXTRA_FLAGS -DCMAKE_CXX_COMPILER='g++'"
 fi
 
-STATUSREACTPATH="$(cd "$SCRIPTPATH" && cd '..' && pwd)"
-WORKFOLDER="$(joinExistingPath "$STATUSREACTPATH" 'StatusImPackage')"
+WORKFOLDER="$(joinExistingPath "$STATUS_REACT_HOME" 'StatusImPackage')"
+JS_BUNDLE_PATH="$WORKFOLDER/index.desktop.bundle"
 
 function init() {
-  if [ -z $STATUSREACTPATH ]; then
-    echo "${RED}STATUSREACTPATH environment variable is not defined!${NC}"
+  if [ -z $STATUS_REACT_HOME ]; then
+    echo "${RED}STATUS_REACT_HOME environment variable is not defined!${NC}"
     exit 1
   fi
 
@@ -104,7 +71,7 @@ function init() {
     rm -rf ./desktop/toolchain/
     # TODO: Use Conan for Linux and MacOS builds too
     if is_windows_target; then
-      export PATH=$STATUSREACTPATH:$PATH
+      export PATH=$STATUS_REACT_HOME:$PATH
       if ! program_exists 'conan'; then
         echo "${RED}Conan package manager not found. Exiting...${NC}"
         exit 1
@@ -124,14 +91,7 @@ function init() {
   fi
 }
 
-function joinStrings() {
-  local arr=("$@")
-  printf -v var "%s;" "${arr[@]}"
-  var=${var%?}
-  echo ${var[@]}
-}
-
-function buildClojureScript() {
+function buildJSBundle() {
   # create directory for all work related to bundling
   rm -rf $WORKFOLDER
   mkdir -p $WORKFOLDER
@@ -139,29 +99,34 @@ function buildClojureScript() {
   echo ""
 
   # from index.desktop.js create javascript bundle and resources folder
-  echo "Generating Status.jsbundle and assets folder..."
-  react-native bundle --entry-file index.desktop.js --bundle-output "$WORKFOLDER/Status.jsbundle" \
-                      --dev false --platform desktop --assets-dest "$WORKFOLDER/assets"
+  echo "Generating $JS_BUNDLE_PATH and assets folder..."
+  react-native bundle \
+    --reset-cache \
+    --dev false \
+    --entry-file index.desktop.js \
+    --bundle-output "$JS_BUNDLE_PATH" \
+    --assets-dest "$WORKFOLDER/assets" \
+    --platform desktop
   echo -e "${GREEN}Generating done.${NC}"
   echo ""
 }
 
 function compile() {
   # Temporarily add path to javascript bundle to package.json
-  local JS_BUNDLE_PATH="$WORKFOLDER/Status.jsbundle"
   local jsBundleLine="\"desktopJSBundlePath\": \"$JS_BUNDLE_PATH\""
-  local jsPackagePath=$(joinExistingPath "$STATUSREACTPATH" 'desktop_files/package.json.orig')
-  local tmp=$(mktemp)
-  jq ".=(. + {$jsBundleLine})" "$jsPackagePath" > "$tmp" && mv "$tmp" "$jsPackagePath"
+  local jsPackagePath=$(joinExistingPath "$STATUS_REACT_HOME" 'desktop/js_files/package.json')
+
+  jq ".=(. + {$jsBundleLine})" "$jsPackagePath" | sponge "$jsPackagePath"
   echo -e "${YELLOW}Added 'desktopJSBundlePath' line to $jsPackagePath:${NC}"
   echo ""
 
-  local EXTERNAL_MODULES_DIR="$(joinStrings ${external_modules_dir[@]})"
-  local DESKTOP_FONTS="$(joinStrings ${external_fonts[@]})"
+  local EXTERNAL_MODULES_DIR="$(jq -r '.desktopExternalModules | @tsv | @text' "$jsPackagePath" | tr '\t' ';')"
+  local DESKTOP_FONTS="$(jq -r '.desktopFonts | @tsv | @text' "$jsPackagePath" | tr '\t' ';')"
+  local DESKTOP_IMAGES="$(jq -r '.desktopImages | @tsv | @text' "$jsPackagePath" | tr '\t' ';')"
   pushd desktop
     rm -rf CMakeFiles CMakeCache.txt cmake_install.cmake Makefile modules reportApp/CMakeFiles desktop/node_modules/google-breakpad/CMakeFiles desktop/node_modules/react-native-keychain/desktop/qtkeychain-prefix/src/qtkeychain-build/CMakeFiles desktop/node_modules/react-native-keychain/desktop/qtkeychain
     if is_windows_target; then
-      export PATH=$STATUSREACTPATH:$PATH
+      export PATH=$STATUS_REACT_HOME:$PATH
 
       # Get the toolchain bin folder from toolchain/conanbuildinfo.json
       local bin_dirs=$(jq -r '.dependencies[0].bin_paths | .[]' toolchain/conanbuildinfo.json)
@@ -178,6 +143,7 @@ function compile() {
           -DCMAKE_BUILD_TYPE=Release \
           -DEXTERNAL_MODULES_DIR="$EXTERNAL_MODULES_DIR" \
           -DDESKTOP_FONTS="$DESKTOP_FONTS" \
+          -DDESKTOP_IMAGES="$DESKTOP_IMAGES" \
           -DJS_BUNDLE_PATH="$JS_BUNDLE_PATH" || exit 1
     make -S -j5 || exit 1
   popd
@@ -188,14 +154,14 @@ function compile() {
 function bundleWindows() {
   local buildType="$1"
 
-  local version_file="${STATUSREACTPATH}/desktop_files/VERSION"
+  local version_file="${STATUS_REACT_HOME}/VERSION"
   VERSION=$(cat $version_file)
   if [ -z "$VERSION" ]; then
     echo "${RED}Could not read version from ${version_file}!${NC}"
     exit 1
   fi
 
-  pushd $STATUSREACTPATH/desktop/bin
+  pushd $STATUS_REACT_HOME/desktop/bin
     rm -rf cmake_install.cmake Makefile CMakeFiles Status_autogen
   popd
 
@@ -209,7 +175,7 @@ function bundleWindows() {
   fi
 
   # TODO this needs to be fixed: status-react/issues/5378
-  local top_srcdir=$(joinExistingPath "$STATUSREACTPATH" '.')
+  local top_srcdir=$(joinExistingPath "$STATUS_REACT_HOME" '.')
   VERSION_MAJOR="$(cut -d'.' -f1 <<<"$VERSION")"
   VERSION_MINOR="$(cut -d'.' -f2 <<<"$VERSION")"
   VERSION_BUILD="$(cut -d'.' -f3 <<<"$VERSION")"
@@ -266,8 +232,8 @@ function bundleLinux() {
     -no-translations -bundle-non-qt-libs \
     -qmake="$qmakePath" \
     -executable="$(joinExistingPath "$usrBinPath" 'reportApp')" \
-    -qmldir="$(joinExistingPath "$STATUSREACTPATH" 'node_modules/react-native')" \
-    -qmldir="$(joinExistingPath "$STATUSREACTPATH" 'desktop/reportApp')" \
+    -qmldir="$(joinExistingPath "$STATUS_REACT_HOME" 'node_modules/react-native')" \
+    -qmldir="$(joinExistingPath "$STATUS_REACT_HOME" 'desktop/reportApp')" \
     -extra-plugins=imageformats/libqsvg.so
 
   pushd $WORKFOLDER
@@ -358,7 +324,7 @@ if is_macos; then
     local exeDir="$contentsDir/MacOS"
 
     [ $VERBOSE_LEVEL -ge 1 ] && echo "Checking rpaths in ${dylib}"
-  
+
     # Walk through the dependencies of $dylib
     local dependencies=$(otool -L "$dylib" | grep -E "\s+/nix/" | sed "s|@executable_path|$exeDir|" | awk -F "(" '{print $1}' | xargs)
     local moduleDirPath=$(dirname $dylib)
@@ -413,7 +379,7 @@ if is_macos; then
       fixupRPathsInDylib "$dylib" "$contentsDir"
 
       # Sanity check for absolute paths
-      local dependencies=$(otool -L "$dylib" | grep -E "\s+${STATUSREACTPATH}")
+      local dependencies=$(otool -L "$dylib" | grep -E "\s+${STATUS_REACT_HOME}")
       if [ -n "$dependencies" ]; then
         echo "Absolute path detected in dependencies of $dylib. Aborting..."
         echo "${dependencies[@]}"
@@ -435,7 +401,7 @@ function bundleMacOS() {
     local usrBinPath=$(joinExistingPath "$WORKFOLDER" "$contentsPath/MacOS")
 
     cp -r assets/share/assets $contentsPath/Resources
-    ln -sf ../Resources/assets ../Resources/ubuntu-server ../Resources/node_modules $usrBinPath
+    ln -sf ../Resources/assets ../Resources/ubuntu-server $usrBinPath
     chmod +x $contentsPath/Resources/ubuntu-server
     cp ../desktop/bin/Status $usrBinPath/Status
     cp ../desktop/bin/reportApp $usrBinPath
@@ -448,7 +414,7 @@ function bundleMacOS() {
 
     local qtbaseplugins=(bearer platforms printsupport styles)
     local qtfullplugins=(iconengines imageformats webview)
-    if program_exists nix && [ -n "$IN_NIX_SHELL" ]; then
+    if [ -n "$IN_NIX_SHELL" ]; then
       # Since in the Nix qt.full package the different Qt modules are spread across several directories,
       # macdeployqt cannot find some qtbase plugins, so we copy them in its place
       mkdir -p "$contentsPath/PlugIns"
@@ -459,8 +425,8 @@ function bundleMacOS() {
     macdeployqt Status.app \
       -verbose=$VERBOSE_LEVEL \
       -executable="$(joinExistingPath "$usrBinPath" 'reportApp')" \
-      -qmldir="$(joinExistingPath "$STATUSREACTPATH" 'node_modules/react-native')" \
-      -qmldir="$(joinExistingPath "$STATUSREACTPATH" 'desktop/reportApp')"
+      -qmldir="$(joinExistingPath "$STATUS_REACT_HOME" 'node_modules/react-native')" \
+      -qmldir="$(joinExistingPath "$STATUS_REACT_HOME" 'desktop/reportApp')"
 
     # macdeployqt doesn't fix rpaths for all the libraries (although it copies them all), so we'll just walk through them and update rpaths to not point to /nix
     echo "Fixing remaining rpaths in modules..."
@@ -489,7 +455,7 @@ function bundle() {
 init
 
 if [ -z "$@" ]; then
-  buildClojureScript
+  buildJSBundle
   compile
   bundle
 else

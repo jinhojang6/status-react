@@ -1,3 +1,4 @@
+nix = load('ci/nix.groovy')
 utils = load('ci/utils.groovy')
 
 def plutil(name, value) {
@@ -16,11 +17,9 @@ def bundle() {
     default:            target = 'nightly';
   }
   /* configure build metadata */
-  utils.nix_sh(
-    plutil('CFBundleShortVersionString', utils.getVersion('mobile_files')) +
-    plutil('CFBundleVersion', utils.genBuildNumber()) +
-    plutil('CFBundleBuildUrl', currentBuild.absoluteUrl)
-  )
+  nix.shell(plutil('CFBundleShortVersionString', utils.getVersion()), attr: 'shells.ios')
+  nix.shell(plutil('CFBundleVersion', utils.genBuildNumber()), attr: 'shells.ios')
+  nix.shell(plutil('CFBundleBuildUrl', currentBuild.absoluteUrl), attr: 'shells.ios')
   /* the dir might not exist */
   sh 'mkdir -p status-e2e'
   /* build the actual app */
@@ -33,7 +32,15 @@ def bundle() {
       passwordVariable: 'FASTLANE_PASSWORD'
     ),
   ]) {
-    utils.nix_sh "bundle exec fastlane ios ${target}"
+    nix.shell(
+      "bundle exec --gemfile=fastlane/Gemfile fastlane ios ${target}",
+      keep: [
+        'FASTLANE_DISABLE_COLORS',
+        'FASTLANE_PASSWORD', 'KEYCHAIN_PASSWORD',
+        'MATCH_PASSWORD', 'FASTLANE_APPLE_ID',
+      ],
+      attr: 'shells.ios'
+    )
   }
   /* rename built file for uploads and archivization */
   def pkg = ''
@@ -56,9 +63,16 @@ def uploadToDiawi() {
   withCredentials([
     string(credentialsId: 'diawi-token', variable: 'DIAWI_TOKEN'),
   ]) {
-    utils.nix_sh 'bundle exec fastlane ios upload_diawi'
+    /* This can silently fail with 'File is not processed.' */
+    nix.shell(
+      'bundle exec --verbose --gemfile=fastlane/Gemfile fastlane ios upload_diawi',
+      keep: ['FASTLANE_DISABLE_COLORS', 'DIAWI_TOKEN'],
+      attr: 'shells.fastlane'
+    )
   }
   diawiUrl = readFile "${env.WORKSPACE}/fastlane/diawi.out"
+  /* Save the URL in the build description */
+  currentBuild.description = "<a href=\"${diawiUrl}\">Diawi Link</a>"
   return diawiUrl
 }
 
@@ -70,10 +84,17 @@ def uploadToSauceLabs() {
     env.SAUCE_LABS_NAME = "im.status.ethereum-e2e-${utils.gitCommit()}.app.zip"
   }
   withCredentials([
-    string(credentialsId: 'SAUCE_ACCESS_KEY', variable: 'SAUCE_ACCESS_KEY'),
-    string(credentialsId: 'SAUCE_USERNAME', variable: 'SAUCE_USERNAME'),
+    usernamePassword(
+      credentialsId:  'sauce-labs-api',
+      usernameVariable: 'SAUCE_USERNAME',
+      passwordVariable: 'SAUCE_ACCESS_KEY'
+    ),
   ]) {
-    utils.nix_sh 'bundle exec fastlane ios saucelabs'
+    nix.shell(
+      'bundle exec --gemfile=fastlane/Gemfile fastlane ios saucelabs',
+      keep: ['FASTLANE_DISABLE_COLORS', 'SAUCE_ACCESS_KEY', 'SAUCE_USERNAME'],
+      attr: 'shells.fastlane'
+    )
   }
   return env.SAUCE_LABS_NAME
 }

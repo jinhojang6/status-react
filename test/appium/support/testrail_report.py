@@ -1,5 +1,7 @@
 import json
 import requests
+import logging
+import itertools
 import emoji
 import base64
 from os import environ
@@ -31,7 +33,10 @@ class TestrailReport(BaseTestReport):
         self.api_url = self.url + 'api/v2/'
 
     def get(self, method):
-        return requests.get(self.api_url + method, headers=self.headers).json()
+        rval = requests.get(self.api_url + method, headers=self.headers).json()
+        if 'error' in rval:
+            logging.error("Failed TestRail request: %s" % rval['error'])
+        return rval
 
     def post(self, method, data):
         data = bytes(json.dumps(data), 'utf-8')
@@ -69,8 +74,11 @@ class TestrailReport(BaseTestReport):
         run = self.post('add_run/%s' % self.project_id, request_body)
         self.run_id = run['id']
 
-    def get_cases(self, section_id):
-        return self.get('get_cases/%s&suite_id=%s&section_id=%s' % (self.project_id, self.suite_id, section_id))
+    def get_cases(self, section_ids):
+        test_cases = list()
+        for section_id in section_ids:
+            test_cases.append(self.get('get_cases/%s&suite_id=%s&section_id=%s' % (self.project_id, self.suite_id, section_id)))
+        return itertools.chain.from_iterable(test_cases)
 
     def get_regression_cases(self, is_pr=False):
         test_cases = dict()
@@ -80,10 +88,10 @@ class TestrailReport(BaseTestReport):
         test_cases['low'] = 737
         case_ids = list()
         if is_pr:
-            case_ids = [case['id'] for case in self.get_cases(test_cases['critical'])]
+            case_ids = [case['id'] for case in self.get_cases([test_cases['critical'], test_cases['high']])]
         else:
             for phase in test_cases:
-                for case in self.get_cases(test_cases[phase]):
+                for case in self.get_cases([test_cases[phase]]):
                     case_ids.append(case['id'])
         return case_ids
 

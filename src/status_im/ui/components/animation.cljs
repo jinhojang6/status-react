@@ -11,14 +11,27 @@
 (defn interpolate [anim-value config]
   (.interpolate anim-value (clj->js config)))
 
+(defn add-native-driver [{:keys [useNativeDriver] :as config}]
+  (assoc config
+         :useNativeDriver
+         (if (nil? useNativeDriver)
+           true
+           useNativeDriver)))
+
 (defn timing [anim-value config]
-  (.timing react/animated anim-value (clj->js config)))
+  (.timing react/animated
+           anim-value
+           (clj->js (add-native-driver config))))
 
 (defn spring [anim-value config]
-  (.spring react/animated anim-value (clj->js config)))
+  (.spring react/animated
+           anim-value
+           (clj->js (add-native-driver config))))
 
 (defn decay [anim-value config]
-  (.decay react/animated anim-value (clj->js config)))
+  (.decay react/animated
+          anim-value
+          (clj->js (add-native-driver config))))
 
 (defn anim-sequence [animations]
   (.sequence react/animated (clj->js animations)))
@@ -29,8 +42,8 @@
 (defn anim-delay [duration]
   (.delay react/animated duration))
 
-(defn event [config]
-  (.event react/animated (clj->js [nil, config])))
+(defn event [mapping config]
+  (.event react/animated (clj->js mapping) (clj->js config)))
 
 (defn add-listener [anim-value listener]
   (.addListener anim-value listener))
@@ -47,6 +60,12 @@
 (defn create-value [value]
   (js/ReactNative.Animated.Value. value))
 
+(defn add [anim-x anim-y]
+  (js/ReactNative.Animated.add. anim-x anim-y))
+
+(defn subtract [anim-x anim-y]
+  (js/ReactNative.Animated.subtract. anim-x anim-y))
+
 (defn x [value-xy]
   (.-x value-xy))
 
@@ -57,5 +76,7 @@
   (js->clj (.getLayout value-xy)))
 
 (defn easing [] js/ReactNative.Easing)
+(defn easing-in [] (.-in (easing)))
+(defn easing-out [] (.-out (easing)))
 
 (defn cubic [] (.-cubic (easing)))

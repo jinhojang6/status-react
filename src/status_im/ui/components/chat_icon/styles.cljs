@@ -41,10 +41,9 @@
           :border-radius 32}))
 
 (def default-chat-icon-text
-  {:color       colors/white
-   :font-size   20
-   :font-weight "700"
-   :opacity     0.8})
+  {:color       (colors/alpha colors/white 0.7)
+   :typography  :title-bold
+   :line-height 21})
 
 (def message-status-icon-text
   {:margin-top -2
@@ -180,6 +179,10 @@
   {:width  40
    :height 40})
 
+(defn container-list-size [size]
+  {:width  size
+   :height size})
+
 (def container-chat-toolbar
   {:width  36
    :height 36})
@@ -210,42 +213,6 @@
     {:width         image-size
      :height        image-size
      :border-radius (/ image-size 2)}))
-
-(def pending-wrapper
-  {:position         :absolute
-   :bottom           0
-   :right            0
-   :width            12
-   :height           12
-   :border-radius    6
-   :background-color :white
-   :align-items      :center
-   :justify-content  :center})
-
-(def pending-view-menu-wrapper
-  {:position         :absolute
-   :bottom           2
-   :right            2
-   :width            12
-   :height           12
-   :border-radius    6
-   :background-color :white
-   :align-items      :center
-   :justify-content  :center})
-
-(def pending-outer-circle
-  {:background-color colors/blue
-   :width            8
-   :height           8
-   :border-radius    4
-   :align-items      :center
-   :justify-content  :center})
-
-(def pending-inner-circle
-  {:background-color :white
-   :width            4
-   :height           4
-   :border-radius    2})
 
 (defn profile-icon-mask [size]
   {:height           size

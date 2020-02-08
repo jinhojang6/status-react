@@ -14,6 +14,7 @@ from support.api.network_api import NetworkApi
 from support.github_report import GithubHtmlReport
 from support.testrail_report import TestrailReport
 from tests.users import transaction_senders
+import tests
 
 sauce_username = environ.get('SAUCE_USERNAME')
 sauce_access_key = environ.get('SAUCE_ACCESS_KEY')
@@ -41,7 +42,7 @@ def pytest_addoption(parser):
                      action='store',
                      default='8.0',
                      help='Android device platform version')
-    parser.addoption('--log',
+    parser.addoption('--log_steps',
                      action='store',
                      default=False,
                      help='Display each test step in terminal as plain text: True/False')
@@ -81,6 +82,14 @@ def pytest_addoption(parser):
                      action='store',
                      default=600,
                      help='Running time in seconds')
+    parser.addoption('--chat_name',
+                     action='store',
+                     default='test_chat',
+                     help='Public chat name')
+    parser.addoption('--device_number',
+                     action='store',
+                     default=2,
+                     help='Public chat name')
 
     # running tests using appium docker instance
 
@@ -134,9 +143,9 @@ def is_uploaded():
 
 
 def pytest_configure(config):
+    tests.pytest_config_global = vars(config.option)
     config.addinivalue_line("markers", "testrail_id(name): empty")
-
-    if config.getoption('log'):
+    if config.getoption('log_steps'):
         import logging
         logging.basicConfig(level=logging.INFO)
     if config.getoption('env') != 'api':
@@ -213,12 +222,12 @@ def pytest_runtest_makereport(item, call):
             current_test.testruns[-1].error = error
         if is_sauce_env:
             update_sauce_jobs(current_test.name, current_test.testruns[-1].jobs, report.passed)
-        if pytest.config.getoption('docker'):
+        if item.config.getoption('docker'):
             device_stats = appium_container.get_device_stats()
-            if pytest.config.getoption('bugreport'):
+            if item.config.getoption('bugreport'):
                 appium_container.generate_bugreport(item.name)
 
-            build_name = pytest.config.getoption('apk')
+            build_name = item.config.getoption('apk')
             # Find type of tests that are run on the device
             if 'battery_consumption' in item.keywords._markers:
                 test_group = 'battery_consumption'
@@ -251,7 +260,10 @@ def get_testrail_case_id(item):
 
 
 def pytest_runtest_setup(item):
-    testrail_id = [mark.args[0] for mark in item.iter_markers(name='testrail_id')][0]
+    try:
+        testrail_id = [mark.args[0] for mark in item.iter_markers(name='testrail_id')][0]
+    except IndexError:
+        pass
     run_testrail_ids = item.config.getoption("run_testrail_ids")
     if run_testrail_ids:
         if str(testrail_id) not in run_testrail_ids:

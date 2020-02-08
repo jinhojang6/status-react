@@ -13,20 +13,22 @@ class TestSignIn(SingleDeviceTestCase):
     @marks.critical
     def test_login_with_new_account(self):
         sign_in = SignInView(self.driver)
-        username = 'test_user'
-        sign_in.create_user(username=username)
+        sign_in.create_user()
+        profile = sign_in.profile_button.click()
+        default_username = profile.default_username_text.text
         self.driver.close_app()
         self.driver.launch_app()
         sign_in.accept_agreements()
-        if not sign_in.element_by_text(username).is_element_displayed():
-            self.errors.append('Username is not shown while login')
+        if not sign_in.element_by_text(default_username).is_element_displayed():
+            self.driver.fail('Username is not shown while login')
         sign_in.sign_in()
         if not sign_in.home_button.is_element_displayed():
-            self.errors.append('User is not logged in')
-        self.verify_no_errors()
+            self.driver.fail('User is not logged in')
 
     @marks.testrail_id(5463)
     @marks.medium
+    @marks.skip
+    # TODO: e2e blocker: 8567 (should be enabled after fix)
     def test_login_with_incorrect_password(self):
         sign_in = SignInView(self.driver)
         sign_in.create_user()
@@ -36,7 +38,7 @@ class TestSignIn(SingleDeviceTestCase):
             sign_in.ok_button.click()
         sign_in.password_input.set_value(common_password + '1')
         sign_in.sign_in_button.click()
-        sign_in.find_full_text('Wrong password')
+        sign_in.find_full_text("Wrong password")
 
     @marks.logcat
     @marks.testrail_id(5415)
@@ -47,23 +49,20 @@ class TestSignIn(SingleDeviceTestCase):
         profile = sign_in.profile_button.click()
         profile.logout()
         sign_in.sign_in()
-        sign_in.check_no_values_in_logcat(password=unique_password)
-
-
-@marks.all
-@marks.sign_in
-class TestSignInOffline(MultipleDeviceTestCase):
+        values_in_logcat = sign_in.find_values_in_logcat(password=unique_password)
+        if values_in_logcat:
+            self.driver.fail(values_in_logcat)
 
     @marks.testrail_id(5327)
     @marks.medium
     def test_offline_login(self):
-        self.create_drivers(1)
-        sign_in = SignInView(self.drivers[0])
+        sign_in = SignInView(self.driver)
         sign_in.create_user()
+        self.driver.close_app()
         sign_in.toggle_airplane_mode()
-        sign_in.accept_agreements()
+        self.driver.launch_app()
         home = sign_in.sign_in()
         home.home_button.wait_for_visibility_of_element()
         connection_text = sign_in.connection_status.text
         if connection_text != 'Offline':
-            pytest.fail("Connection status text '%s' doesn't match expected 'Offline'" % connection_text)
+            self.driver.fail("Connection status text '%s' doesn't match expected 'Offline'" % connection_text)

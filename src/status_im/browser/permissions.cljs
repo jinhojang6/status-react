@@ -1,12 +1,10 @@
 (ns status-im.browser.permissions
   (:require [status-im.constants :as constants]
-            [status-im.data-store.dapp-permissions :as dapp-permissions]
+            [status-im.ethereum.json-rpc :as json-rpc]
             [status-im.i18n :as i18n]
-            [status-im.utils.ethereum.core :as ethereum]
-            [status-im.utils.fx :as fx]
             [status-im.qr-scanner.core :as qr-scanner]
-            [status-im.extensions.registry :as extensions.registry]
-            [status-im.ui.screens.navigation :as navigation]))
+            [status-im.ui.screens.navigation :as navigation]
+            [status-im.utils.fx :as fx]))
 
 (declare process-next-permission)
 (declare send-response-to-bridge)
@@ -14,28 +12,21 @@
 (def supported-permissions
   {constants/dapp-permission-qr-code           {:yield-control? true
                                                 :allowed?       true}
-   constants/dapp-permission-install-extension {:yield-control? true
-                                                :allowed?       true}
-   constants/dapp-permission-contact-code      {:title       (i18n/label :t/wants-to-access-profile)
+   constants/dapp-permission-contact-code      {:type        :profile
+                                                :title       (i18n/label :t/wants-to-access-profile)
                                                 :description (i18n/label :t/your-contact-code)
                                                 :icon        :main-icons/profile}
-   constants/dapp-permission-web3              {:title       (i18n/label :t/dapp-would-like-to-connect-wallet)
+   constants/dapp-permission-web3              {:type        :wallet
+                                                :title       (i18n/label :t/dapp-would-like-to-connect-wallet)
                                                 :description (i18n/label :t/allowing-authorizes-this-dapp)
                                                 :icon        :main-icons/wallet}})
 
 (fx/defn permission-yield-control
   [{:keys [db] :as cofx} dapp-name permission message-id params]
   (cond
-    (= permission constants/dapp-permission-install-extension)
-    (fx/merge cofx
-              (extensions.registry/load (:uri params) true)
-              (send-response-to-bridge permission message-id true nil)
-              (process-next-permission dapp-name))
-
     (= permission constants/dapp-permission-qr-code)
     (fx/merge (assoc-in cofx [:db :browser/options :yielding-control?] true)
-              (qr-scanner/scan-qr-code {:modal? false}
-                                       {:handler        :browser.bridge.callback/qr-code-scanned
+              (qr-scanner/scan-qr-code {:handler        :browser.bridge.callback/qr-code-scanned
                                         :cancel-handler :browser.bridge.callback/qr-code-canceled
                                         :data           {:dapp-name  dapp-name
                                                          :permission permission
@@ -50,9 +41,9 @@
                   :yield-control?       yield-control?})})
 
 (defn get-permission-data [cofx allowed-permission]
-  (let [account (get-in cofx [:db :account/account])]
-    (get {constants/dapp-permission-contact-code (:public-key account)
-          constants/dapp-permission-web3         [(ethereum/normalized-address (:address account))]}
+  (let [multiaccount (get-in cofx [:db :multiaccount])]
+    (get {constants/dapp-permission-contact-code (:public-key multiaccount)
+          constants/dapp-permission-web3         [(:dapps-address multiaccount)]}
          allowed-permission)))
 
 (fx/defn send-response-to-bridge
@@ -75,15 +66,28 @@
                                   (disj dapp-permissions-set permission))
         allowed-permissions     {:dapp        dapp-name
                                  :permissions (vec allowed-permissions-set)}]
-    {:db            (assoc-in db [:dapps/permissions dapp-name] allowed-permissions)
-     :data-store/tx [(dapp-permissions/save-dapp-permissions allowed-permissions)]}))
+    {:db (assoc-in db [:dapps/permissions dapp-name] allowed-permissions)
+     ::json-rpc/call [{:method "permissions_addDappPermissions"
+                       :params [allowed-permissions]
+                       :on-success #()}]}))
 
 (fx/defn revoke-dapp-permissions
   [{:keys [db] :as cofx} dapp]
   (fx/merge cofx
             {:db            (update-in db [:dapps/permissions] dissoc dapp)
-             :data-store/tx [(dapp-permissions/remove-dapp-permissions dapp)]}
+             ::json-rpc/call [{:method "permissions_deleteDappPermissions"
+                               :params [dapp]
+                               :on-success #()}]}
             (navigation/navigate-back)))
+
+(fx/defn clear-dapps-permissions
+  [{:keys [db]}]
+  (let [dapp-permissions (keys (:dapps/permissions db))]
+    {:db             (dissoc db :dapps/permissions)
+     ::json-rpc/call (for [dapp dapp-permissions]
+                       {:method     "permissions_deleteDappPermissions"
+                        :params     [dapp]
+                        :on-success #()})}))
 
 (fx/defn process-next-permission
   "Process next permission by removing it from pending permissions and prompting user

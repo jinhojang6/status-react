@@ -1,106 +1,41 @@
 (ns status-im.ui.screens.home.styles
-  (:require-macros [status-im.utils.styles :refer [defstyle defnstyle]])
   (:require [status-im.ui.components.colors :as colors]
-            [status-im.utils.platform :as platform]
-            [status-im.ui.components.bottom-bar.styles :as tabs.styles]))
+            [status-im.utils.styles :as styles]
+            [status-im.utils.platform :as platform]))
 
 (defn toolbar []
   {:background-color colors/white})
 
-(defstyle sync-wrapper
+(def sync-wrapper
   {:flex-direction :row})
 
-(defstyle sync-info {:margin-horizontal 15})
-
-(defstyle chat-container
-  {:flex-direction   :row
-   :android          {:height 76}
-   :ios              {:height 74}
-   :overflow         :hidden})
-
-(defstyle chat-icon-container
-  {:padding-top    18
-   :padding-bottom 18
-   :padding-left   12
-   :padding-right  20
-   :width          72
-   :android        {:height 76}
-   :ios            {:height 74}})
-
-(def browser-icon-container
-  {:width            40
-   :height           40
-   :border-radius    20
-   :background-color colors/gray-lighter
-   :align-items      :center
-   :justify-content  :center})
-
-(defstyle chat-info-container
-  {:margin-bottom   13
-   :justify-content :space-between
-   :flex            1
-   :flex-direction  :column
-   :android         {:margin-top 16}
-   :ios             {:margin-top 14}})
-
-(defstyle chat-options-container
-  {:padding-top 10})
-
-(defstyle item-upper-container
-  {:flex           1
-   :flex-direction :row
-   :padding-right  16})
-
-(defstyle item-lower-container
-  {:flex            1
-   :flex-direction  :row
-   :justify-content :space-between
-   :padding-right   16
-   :android         {:margin-top 4}
-   :ios             {:margin-top 6}})
-
-(def message-status-container
-  {:flex-direction :row
-   :align-items    :center})
-
-(def name-view
-  {:flex-direction :row
-   :flex           1
-   :margin-right   4})
-
-(defstyle name-text
-  {:color   colors/text
-   :android {:font-size 16
-             :height    26}
-   :ios     {:font-size 17
-             :height    26}})
-
-(defstyle private-group-icon-container
-  {:align-items     :center
-   :justify-content :center
-   :margin-right    6})
-
-(defstyle public-group-icon-container
-  {:align-items     :center
-   :justify-content :center
-   :margin-right    6})
+(def sync-info
+  {:margin-horizontal 15})
 
 (def last-message-container
   {:flex-shrink 1})
 
-(def last-message-text
-  {:color  colors/text-gray
-   :height 24})
+(styles/def last-message-text
+  {:flex        1
+   :align-self  :stretch
+   :line-height 22
+   :color       colors/gray
+   :desktop     {:max-height 20}})
 
 (def search-input-height 56)
 
 (def search-container
-  {:height             search-input-height
-   :flex-direction     :row
-   :padding-horizontal 16
-   :background-color   colors/white
-   :align-items        :center
-   :justify-content    :center})
+  (merge
+   {:height             search-input-height
+    :flex-direction     :row
+    :padding-horizontal 16
+    :background-color   colors/white
+    :align-items        :center
+    :justify-content    :center}
+   (when platform/ios?
+     {:position         :absolute
+      :top              (- search-input-height)
+      :width            "100%"})))
 
 (def search-input-container
   {:background-color colors/gray-lighter
@@ -111,11 +46,10 @@
    :justify-content  :center
    :border-radius    8})
 
-(def search-input
-  (merge {:flex 1}
-         (when platform/android?
-           {:margin      0
-            :padding     0})))
+(styles/def search-input
+  {:flex 1
+   :android {:margin  0
+             :padding 0}})
 
 (def filter-section-title
   {:margin-left   16
@@ -134,19 +68,22 @@
    :width        16
    :height       16})
 
-(defstyle datetime-text
-  {:color   colors/text-gray
-   :android {:font-size 12}
-   :desktop {:font-size 14}
-   :ios     {:font-size 12}})
+(def datetime-text
+  {:color          colors/text-gray
+   :font-size      10
+   :text-align     :right
+   :letter-spacing 0.4
+   :align-items    :center
+   :line-height    12})
 
-(defstyle new-messages-text
+(styles/def new-messages-text
   {:left       0
    :font-size  12
    :color      colors/blue
    :text-align :center
    :android    {:top 2}
-   :ios        {:top 3}})
+   :ios        {:top 3}
+   :desktop    {:top 3}})
 
 (def group-icon
   {:margin-top   8
@@ -156,43 +93,60 @@
    :tint-color   :white})
 
 (def no-chats
-  {:flex              1
-   :align-items       :center
-   :justify-content   :center
-   :margin-horizontal 34})
+  {:flex               1
+   :padding-top        16
+   :padding-horizontal 16
+   :background-color   :white})
+
+(def chat-tooltip
+  {:align-items   :center
+   :border-color  colors/gray-lighter
+   :border-width  1
+   :border-radius 16
+   :margin        16})
 
 (def no-chats-text
-  {:text-align     :center
-   :color          colors/gray})
+  {:margin-top        50
+   :margin-horizontal 16
+   :line-height       22
+   :text-align        :center})
 
 (def welcome-view
-  {:flex 1})
+  {:flex            1
+   :justify-content :flex-end})
 
 (def welcome-image-container
-  {:align-items :center
-   :margin-top  42})
+  {:align-items :center})
 
 (def welcome-text
-  {:typography  :header
-   :margin-top  32
-   :text-align  :center})
+  {:typography :header
+   :text-align :center})
+
+(def welcome-blank-text
+  {:font-size   15
+   :width       270
+   :line-height 22
+   :text-align  :center
+   :color       colors/gray})
 
 (def welcome-text-description
-  {:margin-top        8
+  {:margin-top        16
+   :margin-bottom     32
    :text-align        :center
-   :margin-horizontal 32
+   :margin-horizontal 40
    :color             colors/gray})
 
-(def action-button-container
+(defn action-button-container [home-width]
   {:position    :absolute
+   :z-index     2
    :align-items :center
-   :bottom      (+ tabs.styles/tabs-diff 6)
-   :right       0
-   :left        0})
+   :bottom      16
+   :left        (- (/ home-width 2) 20)
+   :width       40
+   :height      40})
 
 (def action-button
-  {:margin           10
-   :width            40
+  {:width            40
    :height           40
    :background-color colors/blue
    :border-radius    20
@@ -203,3 +157,44 @@
    :shadow-opacity   1
    :shadow-color     "rgba(0, 12, 63, 0.2)"
    :elevation        2})
+
+(def empty-chats-header-container
+  {:align-items     :center
+   :justify-content :center})
+
+(def hr-wrapper
+  {:position         :absolute
+   :width            "100%"
+   :height           1
+   :top              9
+   :border-top-width 1
+   :border-color     colors/gray-lighter})
+
+(def or-text
+  {:width            40
+   :background-color colors/white
+   :font-size        12
+   :text-align       :center
+   :color            colors/gray})
+
+(def tags-wrapper
+  {:margin-top      10
+   :margin-bottom   18})
+
+(def tag-text
+  {:font-size     13
+   :font-weight   "500"
+   :line-height   20
+   :margin-left   10
+   :margin-right  10
+   :margin-top    6
+   :margin-bottom 6
+   :color         colors/blue})
+
+(def close-icon-container
+  {:width            24
+   :height           24
+   :border-radius    12
+   :background-color colors/gray
+   :align-items      :center
+   :justify-content  :center})

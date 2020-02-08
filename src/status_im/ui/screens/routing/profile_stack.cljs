@@ -5,38 +5,44 @@
   {:name    :profile-stack
    :screens (cond-> [:my-profile
                      :contacts-list
+                     :ens-main
+                     :ens-search
+                     :ens-checkout
+                     :ens-confirmation
+                     :ens-terms
+                     :ens-name-details
                      :blocked-users-list
                      :profile-photo-capture
-                     :about-app
                      :bootnodes-settings
                      :installations
                      :edit-bootnode
                      :offline-messaging-settings
                      :edit-mailserver
-                     :help-center
                      :dapps-permissions
+                     :privacy-and-security
+                     :language-settings
+                     :notifications-settings
+                     :sync-settings
+                     :advanced-settings
+                     :help-center
+                     :glossary
+                     :about-app
                      :manage-dapps-permissions
-                     :extensions-settings
-                     :edit-extension
-                     :show-extension
                      :network-settings
                      :network-details
+                     :network-info
                      :edit-network
                      :log-level-settings
                      :fleet-settings
-                     :currency-settings
                      :mobile-network-settings
                      :backup-seed
                      :tribute-to-talk
-                     :qr-scanner
                      :my-profile-ext-settings]
 
               config/hardwallet-enabled?
-              (concat [:hardwallet-authentication-method
-                       :hardwallet-connect
-                       :hardwallet-setup
-                       :hardwallet-success
-                       :keycard-settings
+              (concat [:keycard-settings
                        :reset-card
-                       :enter-pin]))
+                       :keycard-connection-lost
+                       :keycard-processing
+                       :enter-pin-settings]))
    :config  {:initialRouteName :my-profile}})

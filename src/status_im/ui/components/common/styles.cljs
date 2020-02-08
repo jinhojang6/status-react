@@ -1,91 +1,24 @@
 (ns status-im.ui.components.common.styles
-  (:require-macros [status-im.utils.styles :refer [defstyle defnstyle]])
-  (:require [status-im.ui.components.styles :as styles]
-            [status-im.ui.components.colors :as colors]))
-
-(def gradient-top
-  {:flex-direction   :row
-   :height           3
-   :background-color colors/gray-lighter})
-
-(def gradient-top-colors
-  ["rgba(25, 53, 76, 0.01)"
-   "rgba(25, 53, 76, 0.1)"])
-
-(def gradient-bottom
-  {:flex-direction   :row
-   :height           2
-   :background-color colors/gray-lighter})
-
-(def gradient-bottom-colors
-  ["rgba(25, 53, 76, 0.1)"
-   "rgba(25, 53, 76, 0.01)"])
+  (:require [status-im.ui.components.colors :as colors]
+            [status-im.utils.styles :as styles]))
 
 (def separator-wrapper
   {:background-color colors/white})
 
-(defstyle separator
+(styles/def separator
   {:android {:height 0}
    :ios     {:height           1
-             :background-color colors/gray-light
+             :background-color colors/black-transparent
              :opacity          0.5}})
 
 (def list-separator
   {:margin-left 72})
-
-(defstyle form-title-container
-  {:flex-direction :row})
-
-(defstyle form-title-inner-container
-  {:padding-left   16
-   :padding-right  16
-   :flex           1
-   :flex-direction :row
-   :ios            {:background-color colors/white
-                    :padding-top      19
-                    :padding-bottom   15
-                    :margin-top       16}
-   :android        {:background-color colors/gray-lighter
-                    :padding-top      20
-                    :padding-bottom   17
-                    :margin-top       8}})
-
-(def form-title
-  {:flex-shrink 1
-   :color       colors/text
-   :font-size   16})
-
-(def form-title-count
-  (merge form-title
-         {:flex-shrink   0
-          :opacity       0.6
-          :padding-left  8
-          :padding-right 5
-          :color         colors/text-gray}))
-
-(defstyle list-header-footer-spacing
-  {:android {:background-color colors/white
-             :height           8}})
 
 (def network-container
   {:flex-direction     :row
    :padding-horizontal 13
    :padding-vertical   11
    :align-items        :center})
-
-(defn network-text [text-color]
-  {:flex        1
-   :color       (or text-color colors/black)
-   :font-size   14
-   :margin-left 16})
-
-(def network-icon
-  {:width            40
-   :height           40
-   :border-radius    (/ 40 2)
-   :background-color colors/green
-   :align-items      :center
-   :justify-content  :center})
 
 (def label-action-text
   {:color colors/blue})
@@ -99,17 +32,13 @@
    :justify-content  :center})
 
 (defn logo [icon-size]
-  {:color  :white
-   :width  icon-size
-   :height icon-size})
+  {:width  icon-size
+   :height icon-size
+   :container-style {}})
 
-(defn bottom-button [disabled?]
+(def bottom-button
   {:flex-direction :row
-   :align-items    :center
-   :opacity        (if disabled? 0.4 1)})
-
-(def bottom-button-label
-  {:color colors/blue})
+   :align-items    :center})
 
 (defn button [style background? disabled?]
   (merge
@@ -119,7 +48,7 @@
     :background-color   (cond disabled?
                               colors/gray-lighter
                               background?
-                              (colors/alpha colors/blue 0.1))}
+                              colors/blue-transparent-10)}
    style))
 
 (def button-label
@@ -135,7 +64,8 @@
    :justify-content  :center})
 
 (defn counter-label [size]
-  {:font-size  (/ size 2)
+  {:font-size  (inc (/ size 2))
+   :typography :main-medium
    :color      colors/white
    :text-align :center})
 

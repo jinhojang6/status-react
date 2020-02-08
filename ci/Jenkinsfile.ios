@@ -1,5 +1,5 @@
 pipeline {
-  agent { label 'macos' }
+  agent { label 'macos-xcode-11.3.1' }
 
   parameters {
     string(
@@ -22,25 +22,27 @@ pipeline {
   }
 
   environment {
-    TARGET_OS = 'ios'
-    CI_ENVIRONMENT = 'jenkins'
-    LANG = 'en_US.UTF-8'
-    LANGUAGE = 'en_US.UTF-8'
-    LC_ALL = 'en_US.UTF-8'
+    LANG     = "en_US.UTF-8"
+    LC_ALL   = "en_US.UTF-8"
+    LANGUAGE = "en_US.UTF-8"
+    TARGET   = 'ios'
     NIX_CONF_DIR = "${env.WORKSPACE}/nix"
-    FASTLANE_DISABLE_COLORS=1
-    REALM_DISABLE_ANALYTICS=1
+    /* See nix/README.md */
+    NIX_IGNORE_SYMLINK_STORE = 1
+    FASTLANE_DISABLE_COLORS = 1
     BUNDLE_PATH = "${HOME}/.bundle"
+    /* We use EXECUTOR_NUMBER to avoid multiple instances clashing */
+    LEIN_HOME   = "/var/tmp/lein-${EXECUTOR_NUMBER}"
   }
 
   stages {
     stage('Prep') {
       steps {
-        script { 
+        script {
           /* Necessary to load methods */
-          mobile = load 'ci/mobile.groovy'
-          cmn    = load 'ci/common.groovy'
-          btype  = cmn.utils.getBuildType()
+          ios   = load 'ci/ios.groovy'
+          cmn   = load 'ci/common.groovy'
+          btype = cmn.utils.getBuildType()
           print "Running ${btype} build!"
           cmn.ci.abortPreviousRunningBuilds()
           /* Cleanup and Prep */
@@ -48,52 +50,66 @@ pipeline {
         }
       }
     }
-    stage('Lint') {
-      steps {
-        script { cmn.utils.nix_sh('lein cljfmt check') }
+    stage('Parallel Assemble') {
+      parallel {
+        stage('Checks') { stages {
+          stage('Lint') {
+            steps {
+              script { cmn.nix.shell('lein cljfmt check', attr: 'shells.lein') }
+            }
+          }
+          stage('Tests') {
+            steps {
+              script { cmn.nix.shell('lein test-cljs', attr: 'shells.lein') }
+            }
+          }
+        } }
+        stage('Build') { stages {
+          stage('JSBundle') {
+            steps {
+              script { cmn.nix.shell('make jsbundle-ios') }
+            }
+          }
+          stage('Bundle') {
+            steps {
+              script { api = ios.bundle() }
+            }
+          }
+        } }
       }
     }
-    stage('Tests') {
-      steps {
-        script { cmn.utils.nix_sh('lein test-cljs') }
-      }
-    }
-    stage('Build') {
-      steps {
-        script { cmn.utils.nix_sh('lein prod-build-ios') }
-      }
-    }
-    stage('Bundle') {
-      steps {
-        script { api = mobile.ios.bundle() }
-      }
-    }
-    stage('Archive') {
-      steps {
-        archiveArtifacts api
-      }
-    }
-    stage('Upload') {
-      steps {
-        script {
-          env.PKG_URL = cmn.utils.uploadArtifact(api)
-          /* e2e builds get tested in SauceLabs */
-          if (btype == 'e2e') {
-            env.SAUCE_URL = mobile.ios.uploadToSauceLabs()
-          } else {
-            env.DIAWI_URL = mobile.ios.uploadToDiawi()
+    stage('Parallel Upload') {
+      parallel {
+        stage('Archive') {
+          steps {
+            archiveArtifacts api
+          }
+        }
+        stage('Upload') {
+          steps {
+            script {
+              env.PKG_URL = cmn.uploadArtifact(api)
+              /* e2e builds get tested in SauceLabs */
+              if (btype == 'e2e') {
+                env.SAUCE_URL = ios.uploadToSauceLabs()
+              } else {
+                env.DIAWI_URL = ios.uploadToDiawi()
+              }
+            }
           }
         }
       }
     }
     stage('Cleanup') {
       steps {
+        sh 'make watchman-clean'
         sh 'make clean'
       }
     }
   }
   post {
-    success { script { load('ci/common.groovy').notifyPR(true) } }
-    failure { script { load('ci/common.groovy').notifyPR(false) } }
+    success { script { load('ci/github.groovy').notifyPR(true) } }
+    failure { script { load('ci/github.groovy').notifyPR(false) } }
+    always { sh 'make _fix-node-perms' }
   }
 }

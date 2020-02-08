@@ -1,6 +1,6 @@
 (ns status-im.test.search.core
   (:require [cljs.test :refer-macros [deftest testing is]]
-            [status-im.search.subs :as search.subs]))
+            [status-im.subs :as search.subs]))
 
 (deftest filter-chats
   (let [chats {:chat-1 {:name "name1"
@@ -16,7 +16,7 @@
                         :random-name "random-name4"
                         :tags #{"tag4"}}}]
     (testing "no search filter"
-      (is (= 0
+      (is (= (count chats)
              (count (search.subs/apply-filter ""
                                               chats
                                               search.subs/extract-chat-attributes)))))

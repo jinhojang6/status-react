@@ -1,48 +1,119 @@
+nix = load 'ci/nix.groovy'
 utils = load 'ci/utils.groovy'
 
 def bundle() {
+  /* we use the method because parameter build type does not take e2e into account */
   def btype = utils.getBuildType()
   /* Disable Gradle Daemon https://stackoverflow.com/questions/38710327/jenkins-builds-fail-using-the-gradle-daemon */
-  def gradleOpt = "-PbuildUrl='${currentBuild.absoluteUrl}' -Dorg.gradle.daemon=false "
-  def target = "release"
+  def gradleOpt = "-PbuildUrl='${currentBuild.absoluteUrl}' --console plain "
+  /* Can't take more digits than unsigned int */
+  def buildNumber = utils.readBuildNumber().substring(0, 10)
+  /* we don't need x86 for any builds except e2e */
+  env.ANDROID_ABI_INCLUDE="armeabi-v7a;arm64-v8a"
+  env.ANDROID_ABI_SPLIT="false"
 
-  if (params.BUILD_TYPE == 'pr') {
-    /* PR builds shouldn't replace normal releases */
-    target = 'pr'
-  } else if (btype == 'release') {
-    gradleOpt += "-PreleaseVersion='${utils.getVersion('mobile_files')}'"
+  /* some builds tyes require different architectures */
+  switch (btype) {
+    case 'e2e':
+      env.ANDROID_ABI_INCLUDE="x86" /* e2e builds are used with simulators */
+      break
+    case 'release':
+      env.ANDROID_ABI_SPLIT="true"
+      gradleOpt += "-PreleaseVersion='${utils.getVersion()}'"
+      break
   }
-  dir('android') {
-    withCredentials([
-      string(
-        credentialsId: 'android-keystore-pass',
-        variable: 'STATUS_RELEASE_STORE_PASSWORD'
-      ),
-      usernamePassword(
-        credentialsId: 'android-keystore-key-pass',
-        usernameVariable: 'STATUS_RELEASE_KEY_ALIAS',
-        passwordVariable: 'STATUS_RELEASE_KEY_PASSWORD'
-      )
-    ]) {
-      utils.nix_sh "./gradlew assemble${target.capitalize()} ${gradleOpt}"
-    }
+
+  /* credentials necessary to open the keystore and sign the APK */
+  withCredentials([
+    string(
+      credentialsId: 'android-keystore-pass',
+      variable: 'STATUS_RELEASE_STORE_PASSWORD'
+    ),
+    usernamePassword(
+      credentialsId: 'android-keystore-key-pass',
+      usernameVariable: 'STATUS_RELEASE_KEY_ALIAS',
+      passwordVariable: 'STATUS_RELEASE_KEY_PASSWORD'
+    )
+  ]) {
+    /* Nix target which produces the final APKs */
+    nix.build(
+      attr: 'targets.mobile.android.release',
+      conf: [
+        'status-im.ci': '1',
+        'status-im.build-type': btype,
+        'status-im.status-react.gradle-opts': gradleOpt,
+        'status-im.status-react.build-number': buildNumber,
+      ],
+      safeEnv: [
+        'STATUS_RELEASE_KEY_ALIAS',
+        'STATUS_RELEASE_STORE_PASSWORD',
+        'STATUS_RELEASE_KEY_PASSWORD',
+      ],
+      keep: [
+        'ANDROID_ABI_SPLIT',
+        'ANDROID_ABI_INCLUDE',
+        'STATUS_RELEASE_STORE_FILE',
+      ],
+      sbox: [
+        env.STATUS_RELEASE_STORE_FILE,
+      ],
+      link: false
+    )
   }
-  sh 'find android/app/build/outputs/apk'
-  def outApk = "android/app/build/outputs/apk/${target}/app-${target}.apk"
-  def pkg = utils.pkgFilename(btype, 'apk')
-  /* rename for upload */
-  sh "cp ${outApk} ${pkg}"
   /* necessary for Fastlane */
-  env.APK_PATH = pkg
-  env.DIAWI_APK = pkg
-  return pkg
+  def apks = renameAPKs()
+  /* for use with Fastlane */
+  env.APK_PATHS = apks.join(";")
+  return apks
+}
+
+def extractArchFromAPK(name) {
+  def pattern = /app-(.+)-[^-]+.apk/
+  /* extract architecture from filename */
+  def matches = (name =~ pattern)
+  if (matches.size() > 0) {
+    return matches[0][1]
+  }
+  if (utils.isE2EBuild()) {
+    return 'x86'
+  }
+  /* non-release builds make universal APKs */
+  return 'universal'
+}
+
+/**
+ * We need more informative filenames for all builds.
+ * For more details on the format see utils.pkgFilename().
+ **/
+def renameAPKs() {
+  /* find all APK files */
+  def apkGlob = 'result/*.apk'
+  def found = findFiles(glob: apkGlob)
+  if (found.size() == 0) {
+    throw "APKs not found via glob: ${apkGlob}"
+  }
+  def renamed = []
+  /* rename each for upload & archiving */
+  for (apk in found) {
+    def arch = extractArchFromAPK(apk)
+    def pkg = utils.pkgFilename(env.BUILD_TYPE, 'apk', arch)
+    def newApk = "result/${pkg}"
+    renamed += newApk
+    sh "cp ${apk.path} ${newApk}"
+  }
+  return renamed
 }
 
 def uploadToPlayStore(type = 'nightly') {
   withCredentials([
     string(credentialsId: "SUPPLY_JSON_KEY_DATA", variable: 'GOOGLE_PLAY_JSON_KEY'),
   ]) {
-    utils.nix_sh "bundle exec fastlane android ${type}"
+    nix.shell(
+      "fastlane android ${type}",
+      keep: ['FASTLANE_DISABLE_COLORS', 'APK_PATHS', 'GOOGLE_PLAY_JSON_KEY'],
+      attr: 'shells.fastlane',
+      pure: false
+    )
   }
 }
 
@@ -51,27 +122,53 @@ def uploadToSauceLabs() {
   if (changeId != null) {
     env.SAUCE_LABS_NAME = "${changeId}.apk"
   } else {
-    def pkg = utils.pkgFilename(utils.getBuildType(), 'apk')
+    def pkg = utils.pkgFilename(env.BUILD_TYPE, 'apk', 'x86')
     env.SAUCE_LABS_NAME = "${pkg}"
   }
   withCredentials([
-    string(credentialsId: 'SAUCE_ACCESS_KEY', variable: 'SAUCE_ACCESS_KEY'),
-    string(credentialsId: 'SAUCE_USERNAME', variable: 'SAUCE_USERNAME'),
+    usernamePassword(
+      credentialsId:  'sauce-labs-api',
+      usernameVariable: 'SAUCE_USERNAME',
+      passwordVariable: 'SAUCE_ACCESS_KEY'
+    ),
   ]) {
-    utils.nix_sh 'bundle exec fastlane android saucelabs'
+    nix.shell(
+      'fastlane android saucelabs',
+      keep: [
+        'FASTLANE_DISABLE_COLORS', 'APK_PATHS',
+        'SAUCE_ACCESS_KEY', 'SAUCE_USERNAME', 'SAUCE_LABS_NAME'
+      ],
+      attr: 'shells.fastlane',
+      pure: false
+    )
   }
   return env.SAUCE_LABS_NAME
 }
 
 def uploadToDiawi() {
-  env.SAUCE_LABS_NAME = "im.status.ethereum-e2e-${GIT_COMMIT.take(6)}.apk"
   withCredentials([
     string(credentialsId: 'diawi-token', variable: 'DIAWI_TOKEN'),
   ]) {
-    utils.nix_sh 'bundle exec fastlane android upload_diawi'
+    nix.shell(
+      'fastlane android upload_diawi',
+      keep: ['FASTLANE_DISABLE_COLORS', 'APK_PATHS', 'DIAWI_TOKEN'],
+      attr: 'shells.fastlane',
+      pure: false
+    )
   }
   diawiUrl = readFile "${env.WORKSPACE}/fastlane/diawi.out"
   return diawiUrl
+}
+
+def coverage() {
+  withCredentials([
+    string(credentialsId: 'coveralls-status-react-token', variable: 'COVERALLS_REPO_TOKEN'),
+  ]) {
+    nix.shell(
+      'make coverage',
+      keep: ['COVERALLS_REPO_TOKEN', 'COVERALLS_SERVICE_NAME', 'COVERALLS_SERVICE_JOB_ID']
+    )
+  }
 }
 
 return this

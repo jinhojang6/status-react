@@ -1,30 +1,30 @@
 (ns status-im.ui.screens.hardwallet.pin.styles
-  (:require-macros [status-im.utils.styles :refer [defstyle]])
-  (:require [status-im.ui.components.colors :as colors]))
+  (:require [status-im.ui.components.colors :as colors]
+            [status-im.utils.styles :as styles]))
 
 (def container
   {:flex             1
    :background-color colors/white})
 
-(defstyle pin-container
+(styles/def pin-container
   {:flex            1
    :flex-direction  :column
-   :justify-content :space-between
-   :padding-bottom  10
-   :ios             {:margin-top 30}})
+   :justify-content :space-between})
 
-(defstyle error-container
-  {:android {:margin-top 25}
-   :ios     {:margin-top 28}})
+(styles/defn error-container [small-screen?]
+  {:height        (if small-screen? 18 22)
+   :margin-top    (if small-screen? 14 10)
+   :margin-bottom (if small-screen? 10 0)})
 
-(def error-text
+(defn error-text [small-screen?]
   {:color      colors/red
+   :font-size  (if small-screen? 12 15)
    :text-align :center})
 
-(def center-container
+(defn center-container [title]
   {:flex-direction :column
    :align-items    :center
-   :margin-top     28})
+   :margin-top     (if title 20 5)})
 
 (def center-title-text
   {:typography :header})
@@ -38,55 +38,54 @@
 (def pin-indicator-container
   {:flex-direction  :row
    :justify-content :space-between
-   :margin-top      30})
+   :margin-top      16})
 
 (def pin-indicator-group-container
-  {:padding-horizontal 12
-   :flex-direction     :row
-   :justify-content    :space-between})
+  {:flex-direction  :row
+   :justify-content :space-between})
 
-(defn pin-indicator [pressed?]
-  {:width             16
-   :height            16
-   :background-color  (if pressed?
-                        colors/blue
-                        colors/gray-light)
+(defn pin-indicator [pressed? status]
+  {:width             8
+   :height            8
+   :background-color  (if (= status :error)
+                        colors/red
+                        (if pressed?
+                          colors/blue
+                          colors/black-transparent))
    :border-radius     50
-   :margin-horizontal 12})
+   :margin-horizontal 5})
 
 (def waiting-indicator-container
   {:margin-top 26})
 
 (def numpad-container
-  {:margin-top 30})
+  {:margin-top 18})
 
-(def numpad-row-container
+(defn numpad-row-container [small-screen?]
   {:flex-direction  :row
    :justify-content :center
    :align-items     :center
-   :margin-vertical 6})
+   :margin-vertical (if small-screen? 4 10)})
 
-(def numpad-button
-  {:width             72
-   :margin-horizontal 12
-   :height            72
+(defn numpad-button [small-screen?]
+  {:width             (if small-screen? 50 64)
+   :margin-horizontal (if small-screen? 10 14)
+   :height            (if small-screen? 50 64)
    :align-items       :center
    :justify-content   :center
    :flex-direction    :row
    :border-radius     50
-   :background-color  colors/gray-background})
+   :background-color  colors/blue-light})
 
-(def numpad-delete-button
-  (assoc numpad-button :background-color colors/white
-         :border-width 2
-         :border-color colors/gray-background))
+(defn numpad-delete-button [small-screen?]
+  (assoc (numpad-button small-screen?) :background-color colors/white))
 
-(def numpad-empty-button
-  (assoc numpad-button :background-color colors/white
+(defn numpad-empty-button [small-screen?]
+  (assoc (numpad-button small-screen?) :background-color colors/white
          :border-color colors/white))
 
 (def numpad-button-text
-  {:font-size 34
+  {:font-size 22
    :color     colors/blue})
 
 (def numpad-empty-button-text

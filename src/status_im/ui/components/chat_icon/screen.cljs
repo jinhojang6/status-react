@@ -1,11 +1,15 @@
 (ns status-im.ui.components.chat-icon.screen
   (:require [clojure.string :as string]
             [re-frame.core :as re-frame.core]
+            [status-im.multiaccounts.core :as multiaccounts]
             [status-im.ui.components.chat-icon.styles :as styles]
             [status-im.ui.components.colors :as colors]
             [status-im.ui.components.react :as react]
-            [status-im.ui.screens.chat.photos :as photos])
+            [status-im.ui.screens.chat.photos :as photos]
+            [status-im.utils.platform :as platform])
   (:require-macros [status-im.utils.views :refer [defview letsubs]]))
+
+;;TODO REWORK THIS NAMESPACE
 
 (defn default-chat-icon [name styles]
   (when-not (string/blank? name)
@@ -32,20 +36,12 @@
      [react/view online-dot-left]
      [react/view online-dot-right]]]])
 
-(defn pending-contact-badge
-  [{:keys [pending-wrapper pending-outer-circle pending-inner-circle]}]
-  [react/view pending-wrapper
-   [react/view pending-outer-circle
-    [react/view pending-inner-circle]]])
-
 (defn chat-icon-view
-  [{:keys [photo-path added?] :as contact} _group-chat name _online styles & [hide-dapp?]]
+  [contact group-chat name _online styles]
   [react/view (:container styles)
-   (if-not (string/blank? photo-path)
-     [photos/photo photo-path styles]
-     [default-chat-icon name styles])
-   (when (and contact (not added?))
-     [pending-contact-badge styles])])
+   (if-not group-chat
+     [photos/photo (multiaccounts/displayed-photo contact) styles]
+     [default-chat-icon name styles])])
 
 (defn chat-icon-view-toolbar
   [contact group-chat name color online]
@@ -55,39 +51,50 @@
     :online-view            styles/online-view
     :online-dot-left        styles/online-dot-left
     :online-dot-right       styles/online-dot-right
-    :pending-wrapper        styles/pending-wrapper
-    :pending-outer-circle   styles/pending-outer-circle
-    :pending-inner-circle   styles/pending-inner-circle
     :size                   36
     :chat-icon              styles/chat-icon-chat-toolbar
     :default-chat-icon      (styles/default-chat-icon-chat-toolbar color)
     :default-chat-icon-text styles/default-chat-icon-text}])
 
 (defn chat-icon-view-chat-list
-  [contact group-chat name color online & [hide-dapp?]]
+  [contact group-chat name color online]
   [chat-icon-view contact group-chat name online
    {:container              styles/container-chat-list
     :online-view-wrapper    styles/online-view-wrapper
     :online-view            styles/online-view
     :online-dot-left        styles/online-dot-left
     :online-dot-right       styles/online-dot-right
-    :pending-wrapper        styles/pending-wrapper
-    :pending-outer-circle   styles/pending-outer-circle
-    :pending-inner-circle   styles/pending-inner-circle
     :size                   40
     :chat-icon              styles/chat-icon-chat-list
     :default-chat-icon      (styles/default-chat-icon-chat-list color)
-    :default-chat-icon-text styles/default-chat-icon-text}
-   hide-dapp?])
+    :default-chat-icon-text styles/default-chat-icon-text}])
+
+(defn custom-icon-view-list
+  [name color & [size]]
+  [react/view (styles/container-list-size (or size 40))
+   [default-chat-icon name {:default-chat-icon      (styles/default-chat-icon-profile color (or size 40))
+                            :default-chat-icon-text styles/default-chat-icon-text}]])
 
 (defn contact-icon-view
-  [{:keys [photo-path name dapp?]} {:keys [container] :as styles}]
+  [{:keys [name dapp?] :as contact} {:keys [container] :as styles}]
   [react/view container
-   (if-not (string/blank? photo-path)
-     [photos/photo photo-path styles]
-     [default-chat-icon name styles])
+   (if dapp?
+     [default-chat-icon name styles]
+     [photos/photo (multiaccounts/displayed-photo contact) styles])
    (when dapp?
      [dapp-badge styles])])
+
+(defn contact-icon-view-chat [contact]
+  [contact-icon-view contact
+   {:container              styles/container-chat-list
+    :online-view-wrapper    styles/online-view-wrapper
+    :online-view            styles/online-view
+    :online-dot-left        styles/online-dot-left
+    :online-dot-right       styles/online-dot-right
+    :size                   60
+    :chat-icon              styles/chat-icon-chat-list
+    :default-chat-icon      (styles/default-chat-icon-chat-list colors/default-chat-color)
+    :default-chat-icon-text styles/default-chat-icon-text}])
 
 (defn contact-icon-contacts-tab [contact]
   [contact-icon-view contact
@@ -138,17 +145,33 @@
                        :default-chat-icon      (styles/default-chat-icon-profile color size)
                        :default-chat-icon-text styles/default-chat-icon-text} override-styles)]
     [react/view (:container styles)
-     (when edit?
+     (when (and edit? (not platform/desktop?))
        [react/view (styles/profile-icon-mask size)])
-     (when edit?
+     (when (and edit? (not platform/desktop?))
        [react/view (styles/profile-icon-edit-text-containter size)
         [react/i18n-text {:style styles/profile-icon-edit-text :key :edit}]])
      (if (and photo-path (seq photo-path))
        [photos/photo photo-path styles]
        [default-chat-icon name styles])]))
 
-(defn my-profile-icon [{{:keys [photo-path name]} :account
-                        edit?                     :edit?}]
+(defn my-profile-icon [{multiaccount :multiaccount
+                        edit?        :edit?}]
   (let [color colors/default-chat-color
-        size  56]
-    [profile-icon-view photo-path name color edit? size {}]))
+        size  64]
+    [profile-icon-view
+     (multiaccounts/displayed-photo multiaccount)
+     (multiaccounts/displayed-name multiaccount)
+     color
+     edit?
+     size {}]))
+
+(defn my-profile-header-icon [{multiaccount :multiaccount
+                               edit?        :edit?}]
+  (let [color colors/default-chat-color
+        size  40]
+    [profile-icon-view
+     (multiaccounts/displayed-photo multiaccount)
+     (multiaccounts/displayed-name multiaccount)
+     color
+     edit?
+     size {}]))

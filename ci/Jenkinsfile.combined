@@ -20,27 +20,16 @@ pipeline {
         println "Current JOB: ${env.JOB_NAME}"
         /* load common lib */
         cmn = load('ci/common.groovy')
+        gh  = load('ci/github.groovy')
         /* just for a shorter access */
-        btype = cmn.utils.getBuildType() 
+        btype = cmn.utils.getBuildType()
       } }
     }
     stage('Build') {
       parallel {
-        stage('MacOS') { steps { script {
-          osx    = cmn.ci.Build('status-react/combined/desktop-macos')
-        } } }
-        stage('Linux') { steps { script {
-          nix    = cmn.ci.Build('status-react/combined/desktop-linux')
-        } } }
-        stage('Windows') { steps { script {
-          win    = cmn.ci.Build('status-react/combined/desktop-windows')
-        } } }
         stage('iOS') { steps { script {
           ios    = cmn.ci.Build('status-react/combined/mobile-ios')
         } } }
-        //stage('iOS e2e') { steps { script {
-        //  iose2e = cmn.ci.Build('status-react/combined/mobile-ios-e2e')
-        //} } }
         stage('Android') { steps { script {
           apk    = cmn.ci.Build('status-react/combined/mobile-android')
         } } }
@@ -52,11 +41,6 @@ pipeline {
     stage('Archive') {
       steps { script {
         sh('rm -f pkg/*')
-        if (btype != 'release') {
-          cmn.ci.copyArts(osx)
-          cmn.ci.copyArts(nix)
-          cmn.ci.copyArts(win)
-        }
         cmn.ci.copyArts(ios)
         //cmn.ci.copyArts(iose2e)
         cmn.ci.copyArts(apk)
@@ -76,10 +60,8 @@ pipeline {
           Apk: cmn.pkgUrl(apk), Apke2e: cmn.pkgUrl(apke2e),
           iOS: cmn.pkgUrl(ios), /*iOSe2e: cmn.pkgUrl(iose2e),*/
           Diawi: cmn.utils.getEnv(ios, 'DIAWI_URL'),
-          /* desktop */
-          App: cmn.pkgUrl(nix), Mac: cmn.pkgUrl(osx), Win: cmn.pkgUrl(win),
           /* upload the sha256 checksums file too */
-          SHA: cmn.utils.uploadArtifact(cmn.utils.pkgFind('sha256')),
+          SHA: cmn.uploadArtifact(cmn.utils.pkgFind('sha256')),
         ]
         /* add URLs to the build description */
         cmn.ci.setBuildDesc(urls)
@@ -94,8 +76,8 @@ pipeline {
     stage('Publish') {
       steps { script {
         switch (btype) {
-          case 'nightly': build('misc/status.im'); break
-          case 'release': cmn.gh.publishReleaseMobile(); break
+          //case 'nightly': build('misc/status.im'); break
+          case 'release': gh.publishReleaseMobile(); break
         }
       } }
     }
@@ -105,7 +87,7 @@ pipeline {
         e2eApk = cmn.utils.getEnv(apke2e, 'SAUCE_URL')
         build(
           job: 'end-to-end-tests/status-app-nightly', wait: false,
-          parameters: [string(name: 'apk', value: "--apk=${e2eApk}")]
+          parameters: [string(name: 'APK_NAME', value: e2eApk)]
         )
       } }
     }

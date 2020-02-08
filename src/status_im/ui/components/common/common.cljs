@@ -4,94 +4,59 @@
             [status-im.ui.components.colors :as colors]
             [status-im.ui.components.common.styles :as styles]
             [status-im.ui.components.icons.vector-icons :as vector-icons]
-            [status-im.ui.components.react :as react]
-            [status-im.utils.ethereum.core :as ethereum]
-            [status-im.utils.platform :as platform])
+            [status-im.ui.components.react :as react])
   (:require-macros [status-im.utils.views :refer [defview letsubs]]))
 
-(defn top-shadow []
-  (when platform/android?
-    [react/view]))
+(defn logo
+  [{:keys [size]}]
+  [vector-icons/icon :icons/logo (styles/logo size)])
 
-(defn bottom-shadow []
-  (when platform/android?
-    [react/view]))
-
+;;TODO DEPRECATED, use status-im.ui.components.list-item.views
 (defn separator [style & [wrapper-style]]
   [react/view (merge styles/separator-wrapper wrapper-style)
    [react/view (merge styles/separator style)]])
 
+;;TODO DEPRECATED, use status-im.ui.components.list-item.views
 (defn list-separator []
   [separator styles/list-separator])
 
-(defn list-footer []
-  [react/view styles/list-header-footer-spacing])
-
-(defn list-header []
-  [react/view styles/list-header-footer-spacing])
-
-(defn form-title [label & [{:keys [count-value]}]]
-  [react/view
-   [react/view styles/form-title-container
-    [react/view styles/form-title-inner-container
-     [react/text {:style styles/form-title}
-      label]
-     (when-not (nil? count-value)
-       [react/text {:style styles/form-title-count}
-        count-value])]]
-   [top-shadow]])
-
-(defview network-info [{:keys [text-color]}]
-  (letsubs [network-id [:get-network-id]]
-    [react/view
-     [react/view styles/network-container
-      [react/view styles/network-icon
-       [vector-icons/icon :main-icons/network {:color :white}]]
-      [react/text {:style (styles/network-text text-color)}
-       (cond (ethereum/testnet? network-id)
-             (i18n/label :t/testnet-text {:testnet (get-in ethereum/chains [(ethereum/chain-id->chain-keyword network-id) :name] "Unknown")})
-
-             (ethereum/sidechain? network-id)
-             (i18n/label :t/sidechain-text {:sidechain (get-in ethereum/chains [(ethereum/chain-id->chain-keyword network-id) :name] "Unknown")})
-
-             :else
-             (i18n/label :t/mainnet-text))]]]))
-
-(defn logo
-  [{:keys [size icon-size]}]
-  [react/view {:style (styles/logo-container size)}
-   [vector-icons/icon :icons/logo (styles/logo icon-size)]])
-
+;;TODO DEPRECATED, use status-im.ui.components.button
 (defn bottom-button [{:keys [accessibility-label
                              label
                              disabled?
                              on-press
                              forward?
                              back?]}]
-  [react/touchable-highlight {:on-press on-press :disabled disabled?}
-   [react/view (styles/bottom-button disabled?)
-    (when back?
-      [vector-icons/icon :main-icons/back {:color colors/blue
-                                           :container-style {:align-self :baseline}}])
-    [react/text {:style      styles/bottom-button-label
-                 :accessibility-label accessibility-label}
-     (or label (i18n/label :t/next))]
-    (when forward?
-      [vector-icons/icon :main-icons/next {:color colors/blue}])]])
+  (let [color (if disabled? colors/gray colors/blue)]
+    [react/touchable-highlight {:on-press on-press :disabled disabled?}
+     [react/view styles/bottom-button
+      (when back?
+        [vector-icons/icon :main-icons/back {:color           color
+                                             :container-style {:align-self :baseline}}])
+      [react/text {:style               {:color color}
+                   :accessibility-label accessibility-label}
+       (or label (i18n/label :t/next))]
+      (when forward?
+        [vector-icons/icon :main-icons/next {:color color}])]]))
 
-(defn button [{:keys [on-press label background? button-style label-style disabled?] :or {background? true disabled false}}]
-  [react/touchable-highlight {:style (styles/button button-style background? disabled?)
+;;TODO DEPRECATED, use status-im.ui.components.button
+(defn button [{:keys [on-press label background? button-style label-style disabled? accessibility-label] :or {background? true disabled? false}}]
+  [react/touchable-highlight {:style    (styles/button button-style background? disabled?)
                               :on-press on-press
+                              :accessibility-label accessibility-label
                               :disabled disabled?}
    [react/text {:style (merge styles/button-label label-style)}
     label]])
 
+;;TODO DEPRECATED, use status-im.ui.components.button
+;;TODO implement :red type if needed
 (defn red-button [props]
   [react/view {:align-items :center}
    [button (merge props
-                  {:label-style {:color colors/red :font-size 15}
-                   :button-style {:padding-horizontal 32 :background-color  colors/red-light}})]])
+                  {:label-style  {:color colors/red :font-size 15}
+                   :button-style {:padding-horizontal 32 :background-color colors/red-light}})]])
 
+;;TODO DEPRECATED, use status-im.ui.components.badge
 (defn counter
   ([value] (counter nil value))
   ([{:keys [size accessibility-label] :or {size 18}} value]

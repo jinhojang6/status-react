@@ -18,11 +18,12 @@
   ([url body on-success on-error]
    (raw-post url body on-success on-error nil))
   ([url body on-success on-error {:keys [timeout-ms]}]
-   (-> (rn-dependencies/fetch url
-                              (clj->js {:method  "POST"
-                                        :headers {"Cache-Control" "no-cache"}
-                                        :body    body
-                                        :timeout (or timeout-ms http-request-default-timeout-ms)}))
+   (-> (rn-dependencies/fetch
+        url
+        (clj->js {:method  "POST"
+                  :headers {"Cache-Control" "no-cache"}
+                  :body    body
+                  :timeout (or timeout-ms http-request-default-timeout-ms)}))
        (.then (fn [response]
                 (->
                  (.text response)
@@ -32,7 +33,7 @@
                                        :body    body}))))))
        (.catch (or on-error
                    (fn [error]
-                     (utils/show-popup "Error" (str error))))))))
+                     (utils/show-popup "Error" url (str error))))))))
 
 (defn post
   "Performs an HTTP POST request"
@@ -72,7 +73,7 @@
        (.catch (fn [error]
                  (if on-error
                    (on-error {:response-body error})
-                   (utils/show-popup "Error" (str error))))))))
+                   (utils/show-popup "Error" url (str error))))))))
 
 (defn raw-get
   "Performs an HTTP GET request and returns raw results :status :headers :body."
@@ -81,10 +82,11 @@
   ([url on-success on-error]
    (raw-get url on-success on-error nil))
   ([url on-success on-error {:keys [timeout-ms]}]
-   (-> (rn-dependencies/fetch url
-                              (clj->js {:method  "GET"
-                                        :headers {"Cache-Control" "no-cache"}
-                                        :timeout (or timeout-ms http-request-default-timeout-ms)}))
+   (-> (rn-dependencies/fetch
+        url
+        (clj->js {:method  "GET"
+                  :headers {"Cache-Control" "no-cache"}
+                  :timeout (or timeout-ms http-request-default-timeout-ms)}))
        (.then (fn [response]
                 (->
                  (.text response)
@@ -94,7 +96,7 @@
                                        :body    body}))))))
        (.catch (or on-error
                    (fn [error]
-                     (utils/show-popup "Error" (str error))))))))
+                     (utils/show-popup "Error" url (str error))))))))
 
 (defn get
   "Performs an HTTP GET request"
@@ -105,10 +107,11 @@
   ([url on-success on-error params]
    (get url on-success on-error params nil))
   ([url on-success on-error {:keys [valid-response? timeout-ms]} headers]
-   (-> (rn-dependencies/fetch url
-                              (clj->js {:method  "GET"
-                                        :headers (merge {"Cache-Control" "no-cache"} headers)
-                                        :timeout (or timeout-ms http-request-default-timeout-ms)}))
+   (-> (rn-dependencies/fetch
+        url
+        (clj->js {:method  "GET"
+                  :headers (merge {"Cache-Control" "no-cache"} headers)
+                  :timeout (or timeout-ms http-request-default-timeout-ms)}))
        (.then (fn [response]
                 (->
                  (.text response)
@@ -129,7 +132,7 @@
                   :else false)))
        (.catch (or on-error
                    (fn [error]
-                     (utils/show-popup "Error" (str error))))))))
+                     (utils/show-popup "Error" url (str error))))))))
 
 (defn normalize-url [url]
   (str (when (and (string? url) (not (re-find #"^[a-zA-Z-_]+:/" url))) "http://") url))

@@ -22,8 +22,8 @@ INFO_PLIST="${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
 if [[ $(git ls-files -m "StatusIm/Info.plist") = *"Info.plist"* ]]; then
     echo "version was set in Info.plist"
 else
-    RELEASE_VERSION=$(cat ../VERSION)
-    BUILD_NO=$(bash ../scripts/build_no.sh)
+    RELEASE_VERSION=$(cat ../../VERSION)
+    BUILD_NO=$(bash ../scripts/version/build_no.sh)
 
     # For debugging:
     echo "SHORT VERSION: $RELEASE_VERSION"

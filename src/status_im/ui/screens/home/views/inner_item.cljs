@@ -1,29 +1,18 @@
 (ns status-im.ui.screens.home.views.inner-item
-  (:require-macros [status-im.utils.views :refer [defview letsubs]])
-  (:require [re-frame.core :as re-frame]
-            [clojure.string :as str]
+  (:require [clojure.string :as string]
+            [re-frame.core :as re-frame]
             [status-im.constants :as constants]
-            [status-im.chat.commands.core :as commands]
-            [status-im.chat.commands.receiving :as commands-receiving]
-            [status-im.ui.components.react :as react]
-            [status-im.ui.screens.home.styles :as styles]
-            [status-im.utils.core :as utils]
             [status-im.i18n :as i18n]
-            [status-im.utils.datetime :as time]
-            [status-im.ui.components.colors :as colors]
-            [status-im.ui.components.icons.vector-icons :as vector-icons]
             [status-im.ui.components.chat-icon.screen :as chat-icon.screen]
             [status-im.ui.components.common.common :as components.common]
             [status-im.ui.components.list-item.views :as list-item]
-            [clojure.string :as string]
-            [status-im.ui.components.chat-icon.screen :as chat-icon]
-            [status-im.ui.components.list.views :as list]))
-
-(defview command-short-preview [message]
-  (letsubs [id->command [:chats/id->command]
-            {:keys [contacts]} [:chats/current-chat]]
-    (when-let [command (commands-receiving/lookup-command-by-ref message id->command)]
-      (commands/generate-short-preview command (commands/add-chat-contacts contacts message)))))
+            [status-im.ui.components.badge :as badge]
+            [status-im.ui.components.react :as react]
+            [status-im.ui.screens.home.styles :as styles]
+            [status-im.utils.contenthash :as contenthash]
+            [status-im.utils.core :as utils]
+            [status-im.utils.datetime :as time])
+  (:require-macros [status-im.utils.views :refer [defview letsubs]]))
 
 (defn message-content-text [{:keys [content content-type] :as message}]
   [react/view styles/last-message-container
@@ -34,107 +23,67 @@
                   :accessibility-label :no-messages-text}
       (i18n/label :t/no-messages)]
 
-     (= constants/content-type-command content-type)
-     [command-short-preview message]
-
      (= constants/content-type-sticker content-type)
-     [react/image {:style {:margin 2 :width 30 :height 30}
-                   :source {:uri (:uri content)}}]
+     [react/image {:style  {:margin 1 :width 20 :height 20}
+                   :source {:uri (contenthash/url (-> content :sticker :hash))}}]
 
-     (str/blank? (:text content))
+     (string/blank? (:text content))
      [react/text {:style styles/last-message-text}
       ""]
 
      (:text content)
      [react/text {:style               styles/last-message-text
                   :number-of-lines     1
+                  :ellipsize-mode      :tail
                   :accessibility-label :chat-message-text}
-      #_(if-let [render-recipe (:render-recipe content)]
-          (chat.utils/render-chunks render-recipe message))
-      (:text content)]
-
-     :else
-     [react/text {:style               styles/last-message-text
-                  :number-of-lines     1
-                  :accessibility-label :chat-message-text}
-      content])])
+      (string/trim-newline (:text content))])])
 
 (defn message-timestamp [timestamp]
   (when timestamp
     [react/text {:style               styles/datetime-text
                  :accessibility-label :last-message-time-text}
-     (time/to-short-str timestamp)]))
+     (string/upper-case (time/to-short-str timestamp))]))
 
 (defview unviewed-indicator [chat-id]
   (letsubs [unviewed-messages-count [:chats/unviewed-messages-count chat-id]]
     (when (pos? unviewed-messages-count)
-      [components.common/counter {:size                22
-                                  :accessibility-label :unread-messages-count-text}
-       unviewed-messages-count])))
+      [badge/message-counter unviewed-messages-count])))
 
-(defn chat-list-item-name [chat-name group-chat? public? public-key]
-  (let [private-group? (and group-chat? (not public?))
-        public-group?  (and group-chat? public?)]
-    [react/view styles/name-view
-     (when public-group?
-       [react/view styles/public-group-icon-container
-        [vector-icons/icon :tiny-icons/tiny-public {:color colors/gray}]])
-     (when private-group?
-       [react/view styles/private-group-icon-container
-        [vector-icons/icon :tiny-icons/tiny-group {:color colors/gray}]])
-     [react/view {:flex-shrink 1
-                  :align-items :center
-                  :justify-content :center}
-      [react/text {:style               styles/name-text
-                   :number-of-lines     1
-                   :accessibility-label :chat-name-text}
-       chat-name]]]))
-
-(defn home-list-chat-item-inner-view
-  [{:keys [chat-id chat-name
-           name color online
-           group-chat public?
-           public-key contact
-           timestamp
-           last-message-content
-           last-message-content-type]}]
-  (let [truncated-chat-name (utils/truncate-str chat-name 30)]
-    [react/touchable-highlight {:on-press #(re-frame/dispatch [:chat.ui/navigate-to-chat chat-id])}
-     [react/view styles/chat-container
-      [react/view styles/chat-icon-container
-       [chat-icon.screen/chat-icon-view-chat-list contact group-chat truncated-chat-name color online false]]
-      [react/view styles/chat-info-container
-       [react/view styles/item-upper-container
-        [chat-list-item-name truncated-chat-name group-chat public? public-key]
-        [react/view styles/message-status-container
-         [message-timestamp timestamp]]]
-       [react/view styles/item-lower-container
-        [message-content-text {:content      last-message-content
-                               :content-type last-message-content-type}]
-        [unviewed-indicator chat-id]]]]]))
-
-(defn home-list-item [[home-item-id home-item]]
-  (let [delete-action   (if (and (:group-chat home-item)
-                                 (not (:public? home-item)))
-                          :group-chats.ui/remove-chat-pressed
-                          :chat.ui/remove-chat)]
-    [list/deletable-list-item {:type      :chats
-                               :id        home-item-id
-                               :on-delete #(do
-                                             (re-frame/dispatch [:set-swipe-position :chats home-item-id false])
-                                             (re-frame/dispatch [delete-action home-item-id]))}
-     [home-list-chat-item-inner-view home-item]]))
-
-(defn home-list-browser-item-inner-view [{:keys [dapp url name browser-id]}]
-  (let [photo-path (:photo-path dapp)]
+(defn home-list-item [[_ home-item]]
+  (let [{:keys
+         [chat-id chat-name
+          color online group-chat
+          public? contact
+          timestamp
+          last-message]} home-item
+        private-group?                (and group-chat (not public?))
+        public-group?                 (and group-chat public?)
+        truncated-chat-name           (utils/truncate-str chat-name 30)
+        chat-actions                  (cond
+                                        (and group-chat public?)       :public-chat-actions
+                                        (and group-chat (not public?)) :group-chat-actions
+                                        :else                          :private-chat-actions)]
     [list-item/list-item
-     (merge
-      {:title name
-       :subtitle (or url (i18n/label :t/dapp))
-       :on-press #(re-frame/dispatch [:browser.ui/browser-item-selected browser-id])}
-      (if dapp
-        (if (and photo-path (not (string/blank? (:photo-path dapp))))
-          {:image-path photo-path}
-          {:image [chat-icon/default-browser-icon name]})
-        {:image [react/view styles/browser-icon-container
-                 [vector-icons/icon :main-icons/browser {:color colors/gray}]]}))]))
+     {:icon                      [chat-icon.screen/chat-icon-view-chat-list
+                                  contact group-chat truncated-chat-name color online false]
+      :title-prefix              (cond
+                                   private-group? :main-icons/tiny-group
+                                   public-group?  :main-icons/tiny-public
+                                   :else          nil)
+      :title                     truncated-chat-name
+      :title-accessibility-label :chat-name-text
+      :title-row-accessory       [message-timestamp (if (pos? (:whisper-timestamp last-message))
+                                                      (:whisper-timestamp last-message)
+                                                      timestamp)]
+      :subtitle
+      (let [{:keys [tribute-status tribute-label]} (:tribute-to-talk contact)]
+        (if (not (#{:require :pending} tribute-status))
+          [message-content-text {:content      (:content last-message)
+                                 :content-type (:content-type last-message)}]
+          tribute-label))
+      :subtitle-row-accessory    [unviewed-indicator chat-id]
+      :on-press                  #(do
+                                    (re-frame/dispatch [:dismiss-keyboard])
+                                    (re-frame/dispatch [:chat.ui/navigate-to-chat chat-id])
+                                    (re-frame/dispatch [:chat.ui/mark-messages-seen :chat]))
+      :on-long-press             #(re-frame/dispatch [:bottom-sheet/show-sheet chat-actions {:chat-id chat-id}])}]))

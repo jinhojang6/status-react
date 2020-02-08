@@ -15,8 +15,7 @@ from selenium.common.exceptions import WebDriverException
 from support.api.network_api import NetworkApi
 from support.github_report import GithubHtmlReport
 from support.message_reliability_report import create_one_to_one_chat_report, create_public_chat_report
-from tests import test_suite_data, start_threads, appium_container
-
+from tests import test_suite_data, start_threads, appium_container, pytest_config_global
 
 class AbstractTestCase:
     __metaclass__ = ABCMeta
@@ -40,7 +39,7 @@ class AbstractTestCase:
     def print_sauce_lab_info(self, driver):
         sys.stdout = sys.stderr
         print("SauceOnDemandSessionID=%s job-name=%s" % (driver.session_id,
-                                                         pytest.config.getoption('build')))
+                                                         pytest_config_global['build']))
 
     def add_local_devices_to_capabilities(self):
         updated_capabilities = list()
@@ -58,7 +57,7 @@ class AbstractTestCase:
         desired_caps = dict()
         desired_caps['app'] = 'sauce-storage:' + test_suite_data.apk_name
 
-        desired_caps['build'] = pytest.config.getoption('build')
+        desired_caps['build'] = pytest_config_global['build']
         desired_caps['name'] = test_suite_data.current_test.name
         desired_caps['platformName'] = 'Android'
         desired_caps['appiumVersion'] = '1.9.1'
@@ -83,16 +82,16 @@ class AbstractTestCase:
     @property
     def capabilities_local(self):
         desired_caps = dict()
-        if pytest.config.getoption('docker'):
+        if pytest_config_global['docker']:
             # apk is in shared volume directory
-            apk = '/root/shared_volume/%s' % pytest.config.getoption('apk')
+            apk = '/root/shared_volume/%s' % pytest_config_global['apk']
         else:
-            apk = pytest.config.getoption('apk')
+            apk = pytest_config_global['apk']
         desired_caps['app'] = apk
         desired_caps['deviceName'] = 'nexus_5'
         desired_caps['platformName'] = 'Android'
         desired_caps['appiumVersion'] = '1.9.1'
-        desired_caps['platformVersion'] = pytest.config.getoption('platform_version')
+        desired_caps['platformVersion'] = pytest_config_global['platform_version']
         desired_caps['newCommandTimeout'] = 600
         desired_caps['fullReset'] = False
         desired_caps['unicodeKeyboard'] = True
@@ -110,20 +109,14 @@ class AbstractTestCase:
 
     @property
     def environment(self):
-        return pytest.config.getoption('env')
+        return pytest_config_global['env']
 
     @property
     def implicitly_wait(self):
         return 5
 
-    errors = []
-
     network_api = NetworkApi()
     github_report = GithubHtmlReport()
-
-    def verify_no_errors(self):
-        if self.errors:
-            pytest.fail('. '.join([self.errors.pop(0) for _ in range(len(self.errors))]))
 
     def is_alert_present(self, driver):
         try:
@@ -136,7 +129,7 @@ class AbstractTestCase:
 
     def add_alert_text_to_report(self, driver):
         if self.is_alert_present(driver):
-            test_suite_data.current_test.testruns[-1].error += ", also Unexpected Alert is shown: '%s'" \
+            test_suite_data.current_test.testruns[-1].error += "; also Unexpected Alert is shown: '%s'" \
                                                                        % self.get_alert_text(driver)
 
 
@@ -156,12 +149,24 @@ class Driver(webdriver.Remote):
         pytest.fail('Device %s: %s' % (self.number, text))
 
 
+class Errors(object):
+    def __init__(self):
+        self.errors = list()
+
+    def append(self, text=str()):
+        self.errors.append(text)
+
+    def verify_no_errors(self):
+        if self.errors:
+            pytest.fail('\n '.join([self.errors.pop(0) for _ in range(len(self.errors))]))
+
+
 class SingleDeviceTestCase(AbstractTestCase):
 
     def setup_method(self, method, **kwargs):
-        if pytest.config.getoption('docker'):
-            appium_container.start_appium_container(pytest.config.getoption('docker_shared_volume'))
-            appium_container.connect_device(pytest.config.getoption('device_ip'))
+        if pytest_config_global['docker']:
+            appium_container.start_appium_container(pytest_config_global['docker_shared_volume'])
+            appium_container.connect_device(pytest_config_global['device_ip'])
 
         (executor, capabilities) = (self.executor_sauce_lab, self.capabilities_sauce_lab) if \
             self.environment == 'sauce' else (self.executor_local, self.capabilities_local)
@@ -170,8 +175,9 @@ class SingleDeviceTestCase(AbstractTestCase):
         self.driver = Driver(executor, capabilities)
         test_suite_data.current_test.testruns[-1].jobs[self.driver.session_id] = 1
         self.driver.implicitly_wait(self.implicitly_wait)
+        self.errors = Errors()
 
-        if pytest.config.getoption('docker'):
+        if pytest_config_global['docker']:
             appium_container.reset_battery_stats()
 
     def teardown_method(self, method):
@@ -180,7 +186,7 @@ class SingleDeviceTestCase(AbstractTestCase):
         try:
             self.add_alert_text_to_report(self.driver)
             self.driver.quit()
-            if pytest.config.getoption('docker'):
+            if pytest_config_global['docker']:
                 appium_container.stop_container()
         except (WebDriverException, AttributeError):
             pass
@@ -192,6 +198,7 @@ class LocalMultipleDeviceTestCase(AbstractTestCase):
 
     def setup_method(self, method):
         self.drivers = dict()
+        self.errors = Errors()
 
     def create_drivers(self, quantity):
         capabilities = self.add_local_devices_to_capabilities()
@@ -218,11 +225,10 @@ class SauceMultipleDeviceTestCase(AbstractTestCase):
 
     def setup_method(self, method):
         self.drivers = dict()
+        self.errors = Errors()
 
-    def create_drivers(self, quantity=2, max_duration=1800, custom_implicitly_wait=None, offline_mode=False):
+    def create_drivers(self, quantity=2, max_duration=1800, custom_implicitly_wait=None):
         capabilities = {'maxDuration': max_duration}
-        if offline_mode:
-            capabilities['platformVersion'] = '6.0'
         self.drivers = self.loop.run_until_complete(start_threads(quantity,
                                                                   Driver,
                                                                   self.drivers,
@@ -249,8 +255,16 @@ class SauceMultipleDeviceTestCase(AbstractTestCase):
         cls.loop.close()
 
 
-environment = LocalMultipleDeviceTestCase if pytest.config.getoption('env') == 'local' else SauceMultipleDeviceTestCase
+if pytest_config_global['env'] == 'local':
+    MultipleDeviceTestCase = LocalMultipleDeviceTestCase
+else:
+    MultipleDeviceTestCase = SauceMultipleDeviceTestCase
 
 
-class MultipleDeviceTestCase(environment):
-    pass
+class NoDeviceTestCase(AbstractTestCase):
+
+    def setup_method(self, method, **kwargs):
+        pass
+
+    def teardown_method(self, method):
+        self.github_report.save_test(test_suite_data.current_test)

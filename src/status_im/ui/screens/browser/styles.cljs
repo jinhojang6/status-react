@@ -1,10 +1,10 @@
 (ns status-im.ui.screens.browser.styles
-  (:require [status-im.ui.components.colors :as colors])
-  (:require-macros [status-im.utils.styles :refer [defnstyle defstyle]]))
+  (:require [status-im.ui.components.colors :as colors]
+            [status-im.utils.styles :as styles]))
 
 (def browser {:flex 1})
 
-(defstyle dapp-name
+(styles/def dapp-name
   {:flex            1
    :justify-content :center
    :margin-left     12
@@ -13,17 +13,19 @@
 (def dapp-name-text
   {:font-size 16})
 
-(defstyle dapp-text
+(styles/def dapp-text
   {:color   colors/gray
    :ios     {:margin-top 4}
    :android {:font-size 13}})
 
 (def navbar
   {:background-color   :white
-   :height             48
+   :height             51
    :flex-direction     :row
    :align-items        :center
    :justify-content    :space-between
+   :border-top-color   colors/gray-lighter
+   :border-top-width   1
    :padding-horizontal 32})
 
 (def disabled-button
@@ -56,14 +58,14 @@
    :border-radius      8
    :max-height         36
    :background-color   colors/gray-lighter
-   :padding-horizontal 12
-   :margin-right       8
+   :padding-horizontal 10
+   :margin-right       16
    :align-items        :center
    :align-self         :center
    :margin-top         10
    :margin-left        56})
 
-(defstyle url-input
+(def url-input
   {:flex                1
    :text-align-vertical :center
    :margin              0
@@ -78,7 +80,7 @@
 (def dot
   {:height           4
    :width            4
-   :background-color "#E4E6EB"
+   :background-color colors/blue
    :border-radius    2})
 
 (def permissions-panel-container
@@ -93,12 +95,15 @@
    :background-color colors/black
    :opacity          alpha-value})
 
+(def panel-height 354)
+
 (defn permissions-panel [bottom-anim-value]
-  {:height                  354
+  {:height                  panel-height
    :position                :absolute
-   :bottom                  bottom-anim-value
+   :transform               [{:translateY bottom-anim-value}]
    :right                   0
    :left                    0
+   :bottom                  0
    :align-items             :center
    :background-color        :white
    :border-top-left-radius  8
@@ -111,42 +116,53 @@
    :flex-direction  :row})
 
 (def permissions-panel-dapp-icon-container
-  {:height           48
-   :width            48
-   :background-color "#E4E6EB"
-   :border-radius    24
+  {:height           40
+   :width            40
+   :background-color colors/gray-lighter
+   :border-radius    20
    :align-items      :center
    :justify-content  :center})
 
 (def permissions-panel-ok-icon-container
   {:height           24
    :width            24
-   :background-color "#48EA77"
+   :background-color colors/blue-light
    :border-radius    12
    :align-items      :center
    :justify-content  :center})
 
 (def permissions-panel-ok-ico
-  {:color  :white
-   :width  12
-   :height 12})
+  {:color  colors/blue
+   :width  16
+   :height 16})
 
 (def permissions-panel-wallet-icon-container
-  {:height           48
-   :width            48
+  {:height           40
+   :width            40
    :background-color colors/blue
-   :border-radius    24
+   :border-radius    20
    :align-items      :center
    :justify-content  :center})
 
 (def permissions-panel-title-label
-  {:typography        :header
+  {:typography        :title-bold
    :margin-horizontal 20
    :text-align        :center
-   :margin-top        19})
+   :margin-top        16})
 
 (def permissions-panel-description-label
   {:margin-horizontal 20
    :color             colors/gray
    :text-align        :center
-   :margin-top        9})
+   :margin-top        16})
+
+(def permissions-account
+  {:flex-direction     :row
+   :border-radius      36
+   :border-width       1
+   :border-color       colors/gray-lighter
+   :padding-horizontal 8
+   :padding-vertical   6
+   :margin-top         16
+   :align-items        :center
+   :justify-content    :center})

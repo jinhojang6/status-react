@@ -3,15 +3,11 @@
   (:require [re-frame.core :as re-frame]
             [status-im.i18n :as i18n]
             [status-im.ui.components.react :as react]
-            [status-im.ui.components.status-bar.view :as status-bar]
-            [status-im.ui.components.toolbar.view :as toolbar]
             [status-im.react-native.resources :as resources]
             [status-im.ui.components.icons.vector-icons :as vector-icons]
             [status-im.ui.components.colors :as colors]
-            [status-im.ui.screens.hardwallet.components :as components]
-            [status-im.ui.screens.hardwallet.pin.views :as pin.views]
             [status-im.ui.components.common.common :as components.common]
-            [reagent.core :as reagent]))
+            [status-im.ui.components.topbar :as topbar]))
 
 (defn- action-row [{:keys [icon label on-press color-theme]}]
   [react/touchable-highlight
@@ -45,7 +41,8 @@
                                 :size      :large}]]))
 
 (defn- reset-card-next-button [disabled?]
-  [react/view {:margin-right 18}
+  [react/view {:margin-right  18
+               :margin-bottom 15}
    [components.common/bottom-button
     {:on-press   #(re-frame/dispatch [:keycard-settings.ui/reset-card-next-button-pressed])
      :disabled?  disabled?
@@ -54,15 +51,13 @@
 (defview reset-card []
   (letsubs [disabled? [:keycard-reset-card-disabled?]]
     [react/view {:flex 1}
-     [status-bar/status-bar]
-     [toolbar/simple-toolbar
-      (i18n/label :t/reset-card)]
+     [topbar/topbar {:title :t/reset-card}]
      [react/view {:flex             1
                   :background-color :white}
       [react/view {:margin-top  71
                    :flex        1
                    :align-items :center}
-       [react/image {:source (:warning-sign resources/ui)
+       [react/image {:source (resources/get-image :warning-sign)
                      :style  {:width  160
                               :height 160}}]]
       [react/view {:flex               1
@@ -75,9 +70,9 @@
                    :justify-content  :space-between
                    :align-items      :center
                    :width            "100%"
-                   :height           52
+                   :height           68
                    :border-top-width 1
-                   :border-color     colors/gray-light}
+                   :border-color     colors/black-transparent}
        [react/view {:flex 1}]
        [reset-card-next-button disabled?]]]]))
 
@@ -91,17 +86,15 @@
 (defview keycard-settings []
   (letsubs [paired-on [:keycard-paired-on]
             puk-retry-counter [:hardwallet/puk-retry-counter]
-            pairing [:keycard-account-pairing]]
+            pairing [:keycard-multiaccount-pairing]]
     [react/view {:flex 1}
-     [status-bar/status-bar]
-     [toolbar/simple-toolbar
-      (i18n/label :t/status-keycard)]
+     [topbar/topbar {:title :t/status-keycard}]
      [react/view {:flex             1
                   :background-color :white}
       [react/view {:margin-top  47
                    :flex        1
                    :align-items :center}
-       [react/image {:source (:hardwallet-card resources/ui)
+       [react/image {:source (resources/get-image :hardwallet-card)
                      :style  {:width  255
                               :height 160}}]
        (when paired-on
@@ -115,7 +108,7 @@
        (if (zero? puk-retry-counter)
          [card-blocked]
          [react/view
-          [action-row {:icon     :main-icons/info
+          [action-row {:icon     :main-icons/help
                        :label    :t/help-capitalized
                        :on-press #(.openURL react/linking "https://hardwallet.status.im")}]
           (when pairing
@@ -123,13 +116,16 @@
              [action-row {:icon     :main-icons/add
                           :label    :t/change-pin
                           :on-press #(re-frame/dispatch [:keycard-settings.ui/change-pin-pressed])}]
-             [action-row {:icon     :main-icons/close
-                          :label    :t/unpair-card
-                          :on-press #(re-frame/dispatch [:keycard-settings.ui/unpair-card-pressed])}]])])]
-      (when pairing
-        [react/view {:margin-bottom 20
-                     :margin-left   16}
-         [action-row {:icon        :main-icons/logout
-                      :color-theme :red
-                      :label       :t/reset-card
-                      :on-press    #(re-frame/dispatch [:keycard-settings.ui/reset-card-pressed])}]])]]))
+             ;; TODO(rasom): uncomment this when unpairing will be enabled
+             ;; https://github.com/status-im/status-react/issues/9227
+             #_[action-row {:icon     :main-icons/close
+                            :label    :t/unpair-card
+                            :on-press #(re-frame/dispatch [:keycard-settings.ui/unpair-card-pressed])}]])])]
+      ; NOTE: Reset card is hidden until multiaccount removal will be implemented
+      #_(when pairing
+          [react/view {:margin-bottom 35
+                       :margin-left   16}
+           [action-row {:icon        :main-icons/warning
+                        :color-theme :red
+                        :label       :t/reset-card
+                        :on-press    #(re-frame/dispatch [:keycard-settings.ui/reset-card-pressed])}]])]]))

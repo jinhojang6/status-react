@@ -2,6 +2,7 @@ import time
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from views.base_element import BaseButton, BaseText, BaseElement, BaseEditBox
 from views.base_view import BaseView
+from tests import test_dapp_url
 
 
 class WelcomeImageElement(BaseElement):
@@ -14,6 +15,11 @@ class PlusButton(BaseButton):
     def __init__(self, driver):
         super(PlusButton, self).__init__(driver)
         self.locator = self.Locator.accessibility_id("new-chat-button")
+
+class DeleteChatButton(BaseButton):
+    def __init__(self, driver):
+        super(DeleteChatButton, self).__init__(driver)
+        self.locator = self.Locator.accessibility_id("delete-chat-button")
 
 
 class StartNewChatButton(BaseButton):
@@ -52,6 +58,12 @@ class InviteFriendsButton(BaseButton):
     def __init__(self, driver):
         super(InviteFriendsButton, self).__init__(driver)
         self.locator = self.Locator.accessibility_id('invite-friends-button')
+
+
+class ChatsMenuInviteFriendsButton(BaseButton):
+    def __init__(self, driver):
+        super(ChatsMenuInviteFriendsButton, self).__init__(driver)
+        self.locator = self.Locator.accessibility_id('chats-menu-invite-friends-button')
 
 
 class ChatElement(BaseButton):
@@ -93,23 +105,16 @@ class ChatElement(BaseButton):
 
         return DeleteButton(self.driver, self.locator.value)
 
-    def swipe_and_delete(self):
-        counter = 0
-        while counter < 3:
-            self.swipe_element()
-            if self.swipe_delete_button.is_element_present():
-                break
-            time.sleep(3)
-            counter += 1
-        self.swipe_delete_button.click()
-
     @property
     def new_messages_counter(self):
         class UnreadMessagesCountText(BaseText):
             def __init__(self, driver, parent_locator: str):
                 super(UnreadMessagesCountText, self).__init__(driver)
-                locator_str = "//*[@content-desc='unread-messages-count-text']"
-                self.locator = self.Locator.xpath_selector(parent_locator + locator_str)
+                # TODO: commented until accessibility-id will be added back
+                # locator_str = "//*[@content-desc='unread-messages-count-text']"
+                # self.locator = self.Locator.xpath_selector(parent_locator + locator_str)
+                locator_str = "//android.widget.TextView)[last()]"
+                self.locator = self.Locator.xpath_selector("(" + parent_locator + locator_str)
 
         return UnreadMessagesCountText(self.driver, self.locator.value)
 
@@ -145,6 +150,8 @@ class HomeView(BaseView):
         self.new_group_chat_button = NewGroupChatButton(self.driver)
         self.join_public_chat_button = JoinPublicChatButton(self.driver)
         self.invite_friends_button = InviteFriendsButton(self.driver)
+        self.chats_menu_invite_friends_button = ChatsMenuInviteFriendsButton(self.driver)
+        self.delete_chat_button = DeleteChatButton(self.driver)
 
     def wait_for_syncing_complete(self):
         self.driver.info('Waiting for syncing complete:')
@@ -158,14 +165,15 @@ class HomeView(BaseView):
     def get_chat_with_user(self, username):
         return ChatElement(self.driver, username[:25])
 
-    def add_contact(self, public_key):
-        self.plus_button.click()
+    def add_contact(self, public_key, add_in_contacts=True):
+        self.plus_button.click_until_presence_of_element(self.start_new_chat_button)
         contacts_view = self.start_new_chat_button.click()
         contacts_view.public_key_edit_box.click()
         contacts_view.public_key_edit_box.send_keys(public_key)
         one_to_one_chat = self.get_chat_view()
         contacts_view.confirm_until_presence_of_element(one_to_one_chat.chat_message_input)
-        one_to_one_chat.add_to_contacts.click()
+        if add_in_contacts:
+            one_to_one_chat.add_to_contacts.click()
         return one_to_one_chat
 
     def start_1_1_chat(self, username):
@@ -189,7 +197,8 @@ class HomeView(BaseView):
         return ChatView(self.driver)
 
     def join_public_chat(self, chat_name: str):
-        self.plus_button.click()
+        self.plus_button.click_until_presence_of_element(self.join_public_chat_button, attempts=5)
+        self.join_public_chat_button.wait_for_visibility_of_element(5)
         contacts_view = self.join_public_chat_button.click()
         contacts_view.chat_name_editbox.click()
         contacts_view.chat_name_editbox.send_keys(chat_name)
@@ -200,11 +209,16 @@ class HomeView(BaseView):
 
     def open_status_test_dapp(self, allow_all=True):
         dapp_view = self.dapp_tab_button.click()
-        dapp_view.open_url('simpledapp.eth')
+        dapp_view.open_url(test_dapp_url)
         status_test_dapp = dapp_view.get_status_test_dapp_view()
-        for _ in range(2):
-            if allow_all:
-                status_test_dapp.allow_button.click()
-            else:
-                status_test_dapp.deny_button.click()
+        status_test_dapp.allow_button.wait_for_element(20)
+        if allow_all:
+            status_test_dapp.allow_button.click_until_absense_of_element(status_test_dapp.allow_button)
+        else:
+            status_test_dapp.deny_button.click_until_absense_of_element(status_test_dapp.deny_button)
         return status_test_dapp
+
+    def delete_chat_long_press(self, username):
+        self.get_chat_with_user(username).long_press_element()
+        self.delete_chat_button.click()
+        self.delete_button.click()

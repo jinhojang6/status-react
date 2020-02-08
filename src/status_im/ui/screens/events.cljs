@@ -1,39 +1,27 @@
 (ns status-im.ui.screens.events
   (:require status-im.events
-            status-im.dev-server.events
-            status-im.ui.screens.add-new.events
             status-im.ui.screens.add-new.new-chat.events
             status-im.ui.screens.group.chat-settings.events
             status-im.ui.screens.group.events
             status-im.utils.universal-links.events
-            status-im.web3.events
             status-im.ui.screens.add-new.new-chat.navigation
             status-im.ui.screens.profile.events
-            status-im.ui.screens.extensions.add.events
-            status-im.ui.screens.wallet.events
-            status-im.ui.screens.wallet.collectibles.events
-            status-im.ui.screens.wallet.send.events
-            status-im.ui.screens.wallet.request.events
-            status-im.ui.screens.wallet.settings.events
-            status-im.ui.screens.wallet.transactions.events
-            status-im.ui.screens.wallet.choose-recipient.events
-            status-im.ui.screens.wallet.collectibles.cryptokitties.events
-            status-im.ui.screens.wallet.collectibles.cryptostrikers.events
-            status-im.ui.screens.wallet.collectibles.etheremon.events
-            status-im.ui.screens.wallet.collectibles.superrare.events
-            status-im.ui.screens.wallet.collectibles.kudos.events
-            status-im.utils.keychain.events
+            status-im.ui.screens.wallet.navigation
             [re-frame.core :as re-frame]
-            [status-im.hardwallet.core :as hardwallet]
             [status-im.chat.models :as chat]
-            [status-im.native-module.core :as status]
+            [status-im.hardwallet.core :as hardwallet]
             [status-im.mailserver.core :as mailserver]
+            [status-im.multiaccounts.recover.core :as recovery]
+            [status-im.native-module.core :as status]
             [status-im.ui.components.permissions :as permissions]
             [status-im.utils.dimensions :as dimensions]
+            [status-im.utils.fx :as fx]
             [status-im.utils.handlers :as handlers]
             [status-im.utils.http :as http]
             [status-im.utils.utils :as utils]
-            [status-im.utils.fx :as fx]))
+            [status-im.i18n :as i18n]
+            [status-im.constants :as const]
+            [status-im.multiaccounts.biometric.core :as biometric]))
 
 (defn- http-get [{:keys [url response-validator success-event-creator failure-event-creator timeout-ms]}]
   (let [on-success #(re-frame/dispatch (success-event-creator %))
@@ -73,11 +61,6 @@
 (re-frame/reg-fx
  :http-post
  http-post)
-
-(defn- mark-messages-seen
-  [{:keys [db] :as cofx}]
-  (let [{:keys [current-chat-id]} db]
-    (chat/mark-messages-seen cofx current-chat-id)))
 
 (defn- http-raw-post [{:keys [url body response-validator success-event-creator failure-event-creator timeout-ms opts]}]
   (let [on-success #(re-frame/dispatch (success-event-creator %))
@@ -137,18 +120,54 @@
  (fn [{:keys [db]} [_ path v]]
    {:db (assoc-in db path v)}))
 
-(fx/defn on-return-from-background [cofx]
-  (fx/merge cofx
-            (mailserver/process-next-messages-request)
-            (hardwallet/return-back-from-nfc-settings)))
+(def authentication-options
+  {:reason (i18n/label :t/biometric-auth-reason-login)})
+
+(defn- on-biometric-auth-result [{:keys [bioauth-success bioauth-code bioauth-message]}]
+  (when-not bioauth-success
+    (if (= bioauth-code "USER_FALLBACK")
+      (re-frame/dispatch [:multiaccounts.logout.ui/logout-confirmed])
+      (utils/show-confirmation {:title (i18n/label :t/biometric-auth-confirm-title)
+                                :content (or bioauth-message (i18n/label :t/biometric-auth-confirm-message))
+                                :confirm-button-text (i18n/label :t/biometric-auth-confirm-try-again)
+                                :cancel-button-text (i18n/label :t/biometric-auth-confirm-logout)
+                                :on-accept #(biometric/authenticate on-biometric-auth-result authentication-options)
+                                :on-cancel #(re-frame/dispatch [:multiaccounts.logout.ui/logout-confirmed])}))))
+
+(fx/defn on-return-from-background [{:keys [db now] :as cofx}]
+  (let [app-in-background-since (get db :app-in-background-since)
+        signed-up? (get-in db [:multiaccount :signed-up?])
+        biometric-auth? (= (:auth-method db) "biometric")
+        requires-bio-auth (and
+                           signed-up?
+                           biometric-auth?
+                           (some? app-in-background-since)
+                           (>= (- now app-in-background-since)
+                               const/ms-in-bg-for-require-bioauth))]
+    (fx/merge cofx
+              {:db (-> db
+                       (dissoc :app-in-background-since)
+                       (assoc :app-active-since now))}
+              (mailserver/process-next-messages-request)
+              (hardwallet/return-back-from-nfc-settings)
+              #(when requires-bio-auth
+                 (biometric/authenticate % on-biometric-auth-result authentication-options)))))
+
+(fx/defn on-going-in-background [{:keys [db now]}]
+  {:db (-> db
+           (dissoc :app-active-since)
+           (assoc :app-in-background-since now))})
 
 (defn app-state-change [state {:keys [db] :as cofx}]
-  (let [app-coming-from-background? (= state "active")]
+  (let [app-coming-from-background? (= state "active")
+        app-going-in-background? (= state "background")]
     (fx/merge cofx
               {::app-state-change-fx state
                :db                   (assoc db :app-state state)}
               #(when app-coming-from-background?
-                 (on-return-from-background %)))))
+                 (on-return-from-background %))
+              #(when app-going-in-background?
+                 (on-going-in-background %)))))
 
 (handlers/register-handler-fx
  :app-state-change
@@ -166,35 +185,33 @@
    {:db (assoc-in db [:animations type item-id :delete-swiped] value)}))
 
 (handlers/register-handler-fx
- :show-tab-bar
- (fn [{:keys [db]} _]
-   {:db (assoc db :tab-bar-visible? true)}))
-
-(handlers/register-handler-fx
- :hide-tab-bar
- (fn [{:keys [db]} _]
-   {:db (assoc db :tab-bar-visible? false)}))
-
-(handlers/register-handler-fx
  :update-window-dimensions
  (fn [{:keys [db]} [_ dimensions]]
    {:db (assoc db :dimensions/window (dimensions/window dimensions))}))
 
 (handlers/register-handler-fx
+ :set-two-pane-ui-enabled
+ (fn [{:keys [db]} [_ enabled?]]
+   {:db (assoc db :two-pane-ui-enabled? enabled?)}))
+
+(handlers/register-handler-fx
  :screens/on-will-focus
  (fn [{:keys [db] :as cofx} [_ view-id]]
    (fx/merge cofx
-             (if (= view-id :qr-scanner)
-               {:db (-> db
-                        (assoc :view-id view-id)
-                        (assoc-in [:navigation/screen-params view-id :barcode-read?] false))}
-               {:db (assoc db :view-id view-id)})
+             {:db (assoc db :view-id view-id)}
              #(case view-id
                 :keycard-settings (hardwallet/settings-screen-did-load %)
                 :reset-card (hardwallet/reset-card-screen-did-load %)
-                :enter-pin (hardwallet/enter-pin-screen-did-load %)
+                :enter-pin-login (hardwallet/enter-pin-screen-did-load %)
+                :enter-pin-sign (hardwallet/enter-pin-screen-did-load %)
+                :enter-pin-settings (hardwallet/enter-pin-screen-did-load %)
+                :enter-pin-modal (hardwallet/enter-pin-screen-did-load %)
+                :keycard-login-pin (hardwallet/enter-pin-screen-did-load %)
+                :add-new-account-pin (hardwallet/enter-pin-screen-did-load %)
                 :hardwallet-connect (hardwallet/hardwallet-connect-screen-did-load %)
+                :hardwallet-connect-sign (hardwallet/hardwallet-connect-screen-did-load %)
+                :hardwallet-connect-settings (hardwallet/hardwallet-connect-screen-did-load %)
+                :hardwallet-connect-modal (hardwallet/hardwallet-connect-screen-did-load %)
                 :hardwallet-authentication-method (hardwallet/authentication-method-screen-did-load %)
-                :accounts (hardwallet/accounts-screen-did-load %)
-                :chat (mark-messages-seen %)
+                :multiaccounts (hardwallet/multiaccounts-screen-did-load %)
                 nil))))

@@ -1,262 +1,242 @@
 (ns status-im.ui.screens.wallet.send.views
-  (:require-macros [status-im.utils.views :refer [defview letsubs]])
+  (:require-macros [status-im.utils.views :refer [defview letsubs] :as views])
   (:require [re-frame.core :as re-frame]
             [status-im.i18n :as i18n]
-            [status-im.ui.components.animation :as animation]
-            [status-im.ui.components.bottom-buttons.view :as bottom-buttons]
-            [status-im.ui.components.button.view :as button]
-            [status-im.ui.components.common.common :as common]
-            [status-im.ui.components.icons.vector-icons :as vector-icons]
+            [status-im.commands.core :as commands]
             [status-im.ui.components.react :as react]
-            [status-im.ui.components.status-bar.view :as status-bar]
-            [status-im.ui.components.styles :as components.styles]
-            [status-im.ui.components.toolbar.actions :as actions]
-            [status-im.ui.components.toolbar.view :as toolbar]
-            [status-im.ui.components.tooltip.views :as tooltip]
-            [status-im.ui.screens.wallet.components.styles :as wallet.components.styles]
-            [status-im.ui.screens.wallet.components.views :as components]
-            [status-im.ui.screens.wallet.components.views :as wallet.components]
-            [status-im.ui.screens.wallet.send.animations :as send.animations]
+            [status-im.ui.components.toolbar :as toolbar]
             [status-im.ui.screens.wallet.send.styles :as styles]
-            [status-im.ui.screens.wallet.styles :as wallet.styles]
-            [status-im.ui.screens.wallet.main.views :as wallet.main.views]
-            [status-im.utils.money :as money]
-            [status-im.utils.security :as security]
-            [status-im.utils.utils :as utils]
-            [status-im.utils.ethereum.tokens :as tokens]
-            [status-im.utils.ethereum.core :as ethereum]
-            [status-im.transport.utils :as transport.utils]
-            [taoensso.timbre :as log]
-            [reagent.core :as reagent]
+            [status-im.ui.components.bottom-panel.views :as bottom-panel]
             [status-im.ui.components.colors :as colors]
-            [status-im.ui.screens.wallet.utils :as wallet.utils]))
+            [status-im.ui.components.list-item.views :as list-item]
+            [status-im.ui.components.tooltip.views :as tooltip]
+            [status-im.ui.components.chat-icon.screen :as chat-icon]
+            [status-im.ui.components.list.views :as list]
+            [status-im.wallet.utils :as wallet.utils]
+            [status-im.ui.components.icons.vector-icons :as icons]
+            [status-im.multiaccounts.core :as multiaccounts]
+            [status-im.ui.screens.wallet.send.sheets :as sheets]
+            [status-im.ui.screens.wallet.components.views :as components]
+            [status-im.utils.utils :as utils]
+            [status-im.ui.components.button :as button]))
 
-(defn- toolbar [modal? title]
-  (let [action (if modal? actions/close-white actions/back-white)]
-    [toolbar/toolbar {:transparent? true}
-     [toolbar/nav-button (action (if modal?
-                                   #(re-frame/dispatch [:wallet/discard-transaction-navigate-back])
-                                   #(actions/default-handler)))]
-     [toolbar/content-title {:color :white} title]]))
+(defn header [{:keys [label small-screen? on-cancel]}]
+  [react/view (styles/header small-screen?)
+   [react/view {:flex 1}
+    [react/text {:style (merge {:typography :title-bold} (when small-screen? {:font-size 15}))}
+     (i18n/label (or label :t/send-transaction))]]
+   [button/button {:type            :secondary
+                   :container-style {:padding-horizontal 24}
+                   :label           (i18n/label :t/cancel)
+                   :on-press        on-cancel}]])
 
-(defn- advanced-cartouche [native-currency {:keys [max-fee gas gas-price]}]
-  [react/view
-   [wallet.components/cartouche {:on-press #(do (re-frame/dispatch [:wallet.send/clear-gas])
-                                                (re-frame/dispatch [:navigate-to :wallet-transaction-fee]))}
-    (i18n/label :t/wallet-transaction-fee)
-    [react/view {:style               styles/advanced-options-text-wrapper
-                 :accessibility-label :transaction-fee-button}
-     [react/text {:style styles/advanced-fees-text}
-      (str max-fee " " (wallet.utils/display-symbol native-currency))]
-     [react/text {:style styles/advanced-fees-details-text}
-      (str (money/to-fixed gas) " * " (money/to-fixed (money/wei-> :gwei gas-price)) (i18n/label :t/gwei))]]]])
+(defn asset-selector [{:keys [request? token from]}]
+  (let [{:keys [name icon color]} token]
+    [react/touchable-highlight
+     {:on-press (when-not request? #(do
+                                      (re-frame/dispatch [:dismiss-keyboard])
+                                      (re-frame/dispatch [:bottom-sheet/show-sheet
+                                                          {:content        (fn [] [sheets/assets (:address from)])
+                                                           :content-height 300}])))}
+     [react/view {:style               {:flex-direction :row
+                                        :align-items    :center
+                                        :margin-left    16}
+                  :accessibility-label :choose-asset-button}
+      (if icon
+        [list/item-image (assoc icon :style {:background-color colors/gray-lighter
+                                             :border-radius    50} :image-style {:width 32 :height 32})]
+        [chat-icon/custom-icon-view-list name color 32])
+      [react/text {:style {:margin-left 8}}
+       (wallet.utils/display-symbol token)]
+      (when-not request?
+        [icons/icon :main-icons/dropdown {:color colors/gray}])]]))
 
-(defn- advanced-options [advanced? native-currency transaction scroll]
-  [react/view {:style styles/advanced-wrapper}
-   [react/touchable-highlight {:on-press (fn []
-                                           (re-frame/dispatch [:wallet.send/toggle-advanced (not advanced?)])
-                                           (when (and scroll @scroll) (utils/set-timeout #(.scrollToEnd @scroll) 350)))}
-    [react/view {:style styles/advanced-button-wrapper}
-     [react/view {:style               styles/advanced-button
-                  :accessibility-label :advanced-button}
-      [react/i18n-text {:style (merge wallet.components.styles/label
-                                      styles/advanced-label)
-                        :key   :wallet-advanced}]
-      [vector-icons/icon (if advanced? :main-icons/dropdown-up :main-icons/dropdown) {:color :white}]]]]
-   (when advanced?
-     [advanced-cartouche native-currency transaction])])
+(defn render-account [account {:keys [amount decimals] :as token} event]
+  [list-item/list-item
+   {:icon        [chat-icon/custom-icon-view-list (:name account) (:color account)]
+    :title       (:name account)
+    :subtitle    (str (wallet.utils/format-amount amount decimals)
+                      " "
+                      (wallet.utils/display-symbol token))
+    :accessories [:chevron]
+    :on-press    #(do
+                    (re-frame/dispatch [:dismiss-keyboard])
+                    (re-frame/dispatch [:bottom-sheet/show-sheet
+                                        {:content        (fn [] [sheets/accounts-list :from event])
+                                         :content-height 300}]))}])
 
-(defview password-input-panel [message-label spinning?]
-  (letsubs [account [:account/account]
-            wrong-password? [:wallet.send/wrong-password?]
-            signing-phrase (:signing-phrase @account)
-            bottom-value (animation/create-value -250)
-            opacity-value (animation/create-value 0)]
-    {:component-did-mount #(send.animations/animate-sign-panel opacity-value bottom-value)}
-    [react/animated-view {:style (styles/animated-sign-panel bottom-value)}
-     (when wrong-password?
-       [tooltip/tooltip (i18n/label :t/wrong-password) styles/password-error-tooltip])
-     [react/animated-view {:style (styles/sign-panel opacity-value)}
-      [react/view styles/spinner-container
-       (when spinning?
-         [react/activity-indicator {:animating true
-                                    :size      :large}])]
-      [react/view styles/signing-phrase-container
-       [react/text {:accessibility-label :signing-phrase-text}
-        signing-phrase]]
-      [react/i18n-text {:style styles/signing-phrase-description :key message-label}]
-      [react/view {:style                       styles/password-container
-                   :important-for-accessibility :no-hide-descendants}
-       [react/text-input
-        {:auto-focus             true
-         :secure-text-entry      true
-         :placeholder            (i18n/label :t/enter-password)
-         :placeholder-text-color colors/gray
-         :on-change-text         #(re-frame/dispatch [:wallet.send/set-password (security/mask-data %)])
-         :style                  styles/password
-         :accessibility-label    :enter-password-input
-         :auto-capitalize        :none}]]]]))
+(defn render-contact [contact from-chat?]
+  (if from-chat?
+    [list-item/list-item {:title (multiaccounts/displayed-name contact)
+                          :subtitle (:address contact)
+                          :icon  (multiaccounts/displayed-photo contact)}]
+    [list-item/list-item
+     {:title       (utils/get-shortened-checksum-address
+                    (if (string? contact) contact (:address contact)))
+      :subtitle    (when-not contact (i18n/label :t/wallet-choose-recipient))
+      :accessibility-label :choose-recipient-button
+      :on-press    #(do
+                      (re-frame/dispatch [:dismiss-keyboard])
+                      (re-frame/dispatch [:bottom-sheet/show-sheet
+                                          {:content        sheets/choose-recipient
+                                           :content-height 200}]))
+      :accessories [:chevron]}]))
 
-;; "Cancel" and "Sign Transaction >" or "Sign >" buttons, signing with password
-(defview enter-password-buttons [spinning? cancel-handler sign-handler sign-label]
-  (letsubs [sign-enabled? [:wallet.send/sign-password-enabled?]
-            network-status [:network-status]]
-    [bottom-buttons/bottom-buttons
-     styles/sign-buttons
-     [button/button {:style               components.styles/flex
-                     :on-press            cancel-handler
-                     :accessibility-label :cancel-button}
-      (i18n/label :t/cancel)]
-     [button/button {:style               (wallet.styles/button-container sign-enabled?)
-                     :on-press            sign-handler
-                     :disabled?           (or spinning?
-                                              (not sign-enabled?)
-                                              (= :offline network-status))
-                     :accessibility-label :sign-transaction-button}
-      (i18n/label sign-label)
-      [vector-icons/icon :main-icons/next {:color colors/white}]]]))
+(views/defview sheet [_]
+  (views/letsubs [{:keys [amount-error amount-text
+                          request?
+                          from token to sign-enabled? from-chat?] :as tx}
+                  [:wallet.send/prepare-transaction-with-balance]
+                  window-height [:dimensions/window-height]
+                  keyboard-height [:keyboard-height]]
+    (let [small-screen? (< (- window-height keyboard-height) 450)]
+      [react/view {:style (styles/sheet small-screen?)}
+       [header {:small-screen? small-screen?
+                :on-cancel #(re-frame/dispatch [:wallet/cancel-transaction-command])}]
+       [react/view {:flex-direction :row :padding-horizontal 24 :align-items :center
+                    :margin-vertical (if small-screen? 8 16)}
+        [react/text-input
+         {:style               {:font-size (if small-screen? 24 38)
+                                :color (when amount-error colors/red)
+                                :flex-shrink 1}
+          :keyboard-type       :numeric
+          :accessibility-label :amount-input
+          :default-value       amount-text
+          :editable            (not request?)
+          :auto-focus          true
+          :on-change-text      #(re-frame/dispatch [:wallet.send/set-amount-text %])
+          :placeholder         "0.0 "}]
+        [asset-selector tx]
+        (when amount-error
+          [tooltip/tooltip (if from
+                             amount-error
+                             (i18n/label :t/select-account-first))
+           {:bottom-value 2
+            :font-size    12}])]
+       [components/separator]
+       (when-not small-screen?
+         [list-item/list-item {:type :section-header :title :t/from}])
+       [react/view {:flex-direction :row :flex 1 :align-items :center}
+        (when small-screen?
+          [react/i18n-text {:style {:width 50 :text-align :right :color colors/gray} :key :t/from}])
+        [react/view {:flex 1}
+         [render-account from token :wallet.send/set-field]]]
+       (when-not small-screen?
+         [list-item/list-item {:type :section-header :title :t/to}])
+       [react/view {:flex-direction :row :flex 1 :align-items :center}
+        (when small-screen?
+          [react/i18n-text {:style {:width 50 :text-align :right :color colors/gray} :key :t/to}])
+        [react/view {:flex 1}
+         [render-contact to from-chat?]]]
+       [toolbar/toolbar
+        {:center
+         {:label               :t/wallet-send
+          :accessibility-label :send-transaction-bottom-sheet
+          :disabled?           (not sign-enabled?)
+          :on-press            #(re-frame/dispatch
+                                 [(cond
+                                    request?
+                                    :wallet.ui/sign-transaction-button-clicked-from-request
+                                    from-chat?
+                                    :wallet.ui/sign-transaction-button-clicked-from-chat
+                                    :else
+                                    :wallet.ui/sign-transaction-button-clicked) tx])}}]])))
 
-;; "Sign Transaction >" button
-(defn- sign-transaction-button [amount-error to amount sufficient-funds? sufficient-gas? modal? online?]
-  (let [sign-enabled? (and (nil? amount-error)
-                           (or modal? (not (empty? to)))    ;;NOTE(goranjovic) - contract creation will have empty `to`
-                           (not (nil? amount))
-                           sufficient-funds?
-                           sufficient-gas?
-                           online?)]
-    [bottom-buttons/bottom-buttons
-     styles/sign-buttons
-     [react/view]
-     [button/button {:style               components.styles/flex
-                     :disabled?           (not sign-enabled?)
-                     :on-press            #(re-frame/dispatch [:wallet.ui/sign-transaction-button-clicked])
-                     :text-style          {:color :white}
-                     :accessibility-label :sign-transaction-button}
-      (i18n/label :t/transactions-sign-transaction)
-      [vector-icons/icon :main-icons/next {:color (if sign-enabled? colors/white colors/white-light-transparent)}]]]))
+(views/defview request-sheet [_]
+  (views/letsubs [{:keys [amount-error amount-text from token to sign-enabled? from-chat?] :as tx}
+                  [:wallet.request/prepare-transaction-with-balance]
+                  window-height [:dimensions/window-height]
+                  keyboard-height [:keyboard-height]]
+    (let [small-screen? (< (- window-height keyboard-height) 450)]
+      [react/view {:style (styles/sheet small-screen?)}
+       [header {:small-screen? small-screen?
+                :label :t/request-transaction
+                :on-cancel #(re-frame/dispatch [:wallet/cancel-transaction-command])}]
+       [react/view {:flex-direction :row :padding-horizontal 24 :align-items :center
+                    :margin-vertical (if small-screen? 8 16)}
+        [react/text-input
+         {:style               {:font-size (if small-screen? 24 38)
+                                :color (when amount-error colors/red)
+                                :flex-shrink 1}
+          :keyboard-type       :numeric
+          :accessibility-label :amount-input
+          :default-value       amount-text
+          :auto-focus          true
+          :on-change-text      #(re-frame/dispatch [:wallet.request/set-amount-text %])
+          :placeholder         "0.0 "}]
+        [asset-selector tx]
+        (when amount-error
+          [tooltip/tooltip amount-error {:bottom-value 2
+                                         :font-size    12}])]
+       [components/separator]
+       (when-not small-screen?
+         [list-item/list-item {:type :section-header :title :t/to}])
+       [react/view {:flex-direction :row :flex 1 :align-items :center}
+        (when small-screen?
+          [react/i18n-text {:style {:width 50 :text-align :right :color colors/gray} :key :t/to}])
+        [react/view {:flex 1}
+         [render-account from token :wallet.request/set-field]]]
+       [toolbar/toolbar
+        {:center
+         {:label               :t/wallet-request
+          :accessibility-label :request-transaction-bottom-sheet
+          :disabled?           (not sign-enabled?)
+          :on-press            #(re-frame/dispatch
+                                 [:wallet.ui/request-transaction-button-clicked tx])}}]])))
 
-(defn signing-phrase-view [signing-phrase]
-  [react/view {:flex-direction :column
-               :align-items    :center
-               :margin-top     10}
-   [react/view (assoc styles/signing-phrase-container :width "90%" :height 40)
-    [react/text {:accessibility-label :signing-phrase-text
-                 :style               {:padding-vertical 16
-                                       :text-align       :center}}
-     signing-phrase]]
-   [react/text {:style {:color            :white
-                        :text-align       :center
-                        :font-size        12
-                        :padding-vertical 14}}
-    (i18n/label :t/signing-phrase-warning)]])
+(views/defview select-account-sheet [{:keys [from message]}]
+  (views/letsubs [window-height [:dimensions/window-height]
+                  keyboard-height [:keyboard-height]]
+    (let [small-screen? (< (- window-height keyboard-height) 450)]
+      [react/view {:style (styles/sheet small-screen?)}
+       [header {:small-screen? small-screen?
+                :label :t/select-account
+                :on-cancel #(re-frame/dispatch [:set :commands/select-account nil])}]
+       [react/view {:flex-direction :row :padding-horizontal 24 :align-items :center
+                    :margin-vertical (if small-screen? 8 16)}]
+       (when-not small-screen?
+         [list-item/list-item {:type :section-header :title :t/from}])
+       [react/view {:flex-direction :row :flex 1 :align-items :center}
+        (when small-screen?
+          [react/i18n-text {:style {:width 50 :text-align :right :color colors/gray} :key :t/from}])
+        [react/view {:flex 1}
+         [render-account from nil ::commands/set-selected-account]]]
+       [toolbar/toolbar
+        {:center
+         {:label               :t/select
+          :accessibility-label :select-account-bottom-sheet
+          :disabled?           (nil? from)
+          :on-press            #(re-frame/dispatch
+                                 [::commands/accept-request-address-for-transaction
+                                  (:message-id message)
+                                  (:address from)])}}]])))
 
-(defn- render-send-transaction-view [{:keys [modal? transaction scroll advanced? keycard? signing-phrase network all-tokens amount-input network-status]}]
-  (let [{:keys [amount amount-text amount-error asset-error show-password-input? to to-name sufficient-funds?
-                sufficient-gas? in-progress? from-chat? symbol]} transaction
-        chain (ethereum/network->chain-keyword network)
-        native-currency (tokens/native-currency chain)
-        {:keys [decimals] :as token} (tokens/asset-for all-tokens chain symbol)
-        online? (= :online network-status)]
-    [wallet.components/simple-screen {:avoid-keyboard? (not modal?)
-                                      :status-bar-type (if modal? :modal-wallet :wallet)}
-     [toolbar modal? (i18n/label :t/send-transaction)]
-     [react/view components.styles/flex
-      [common/network-info {:text-color :white}]
-      [react/scroll-view {:keyboard-should-persist-taps :always
-                          :ref                          #(reset! scroll %)
-                          :on-content-size-change       #(when (and (not modal?) scroll @scroll)
-                                                           (.scrollToEnd @scroll))}
-       (when-not online?
-         [wallet.main.views/snackbar :t/error-cant-send-transaction-offline])
-       [react/view styles/send-transaction-form
-        [components/recipient-selector {:disabled? (or from-chat? modal?)
-                                        :address   to
-                                        :name      to-name
-                                        :modal?    modal?}]
-        [components/asset-selector {:disabled? (or from-chat? modal?)
-                                    :error     asset-error
-                                    :type      :send
-                                    :symbol    symbol}]
-        [components/amount-selector {:disabled?     (or from-chat? modal?)
-                                     :error         (or amount-error
-                                                        (when-not sufficient-funds? (i18n/label :t/wallet-insufficient-funds))
-                                                        (when-not sufficient-gas? (i18n/label :t/wallet-insufficient-gas)))
-                                     :amount        amount
-                                     :amount-text   amount-text
-                                     :input-options {:on-change-text #(re-frame/dispatch [:wallet.send/set-and-validate-amount % symbol decimals])
-                                                     :ref            (partial reset! amount-input)}} token]
-        [advanced-options advanced? native-currency transaction scroll]
-        (when keycard?
-          [signing-phrase-view signing-phrase])]]
-      (if show-password-input?
-        [enter-password-buttons in-progress?
-         #(re-frame/dispatch [:wallet/cancel-entering-password])
-         #(re-frame/dispatch [:wallet/send-transaction])
-         :t/transactions-sign-transaction]
-        [sign-transaction-button amount-error to amount sufficient-funds? sufficient-gas? modal? online?])
-      (when show-password-input?
-        [password-input-panel :t/signing-phrase-description in-progress?])
-      (when in-progress? [react/view styles/processing-view])]]))
+(defview prepare-transaction []
+  (letsubs [tx [:wallet/prepare-transaction]]
+    [bottom-panel/animated-bottom-panel
+     ;;we use select-keys here because we don't want to update view if other keys in map are changed
+     ;; and because modal screen (qr code scanner) can't be opened over bottom sheet we have to use :modal-opened?
+     ;; to hide our transaction panel
+     (when (and tx
+                (not (:modal-opened? tx))
+                (not (:request-command? tx)))
+       (select-keys tx [:from-chat?]))
+     sheet]))
 
-;; MAIN SEND TRANSACTION VIEW
-(defn- send-transaction-view [{:keys [scroll] :as opts}]
-  (let [amount-input (atom nil)
-        handler (fn [_]
-                  (when (and scroll @scroll @amount-input
-                             (.isFocused @amount-input))
-                    (log/debug "Amount field focused, scrolling down")
-                    (.scrollToEnd @scroll)))]
-    (reagent/create-class
-     {:component-will-mount (fn [_]
-                              ;;NOTE(goranjovic): keyboardDidShow is for android and keyboardWillShow for ios
-                              (.addListener react/keyboard "keyboardDidShow" handler)
-                              (.addListener react/keyboard "keyboardWillShow" handler))
-      :reagent-render       (fn [opts] (render-send-transaction-view
-                                        (assoc opts :amount-input amount-input)))})))
+(defview request-transaction []
+  (letsubs [tx [:wallet/prepare-transaction]]
+    [bottom-panel/animated-bottom-panel
+     ;;we use select-keys here because we don't want to update view if other keys in map are changed
+     ;; and because modal screen (qr code scanner) can't be opened over bottom sheet we have to use :modal-opened?
+     ;; to hide our transaction panel
+     (when (and tx
+                (not (:modal-opened? tx))
+                (:request-command? tx))
+       (select-keys tx [:from-chat? :request?]))
+     request-sheet]))
 
-;; SEND TRANSACTION FROM WALLET (CHAT)
-(defview send-transaction []
-  (letsubs [transaction [:wallet.send/transaction]
-            advanced? [:wallet.send/advanced?]
-            network [:account/network]
-            scroll (atom nil)
-            network-status [:network-status]
-            all-tokens [:wallet/all-tokens]
-            signing-phrase [:wallet.send/signing-phrase-with-padding]
-            keycard? [:keycard-account?]]
-    [send-transaction-view {:modal?         false
-                            :transaction    transaction
-                            :scroll         scroll
-                            :advanced?      advanced?
-                            :keycard?       keycard?
-                            :signing-phrase signing-phrase
-                            :network        network
-                            :all-tokens     all-tokens
-                            :network-status network-status}]))
-
-;; SEND TRANSACTION FROM DAPP
-(defview send-transaction-modal []
-  (letsubs [transaction [:wallet.send/transaction]
-            advanced? [:wallet.send/advanced?]
-            network [:account/network]
-            scroll (atom nil)
-            network-status [:network-status]
-            all-tokens [:wallet/all-tokens]
-            signing-phrase [:wallet.send/signing-phrase-with-padding]
-            keycard? [:keycard-account?]]
-    (if transaction
-      [send-transaction-view {:modal?         true
-                              :transaction    transaction
-                              :scroll         scroll
-                              :advanced?      advanced?
-                              :keycard?       keycard?
-                              :signing-phrase signing-phrase
-                              :network        network
-                              :all-tokens     all-tokens
-                              :network-status network-status}]
-      [react/view wallet.styles/wallet-modal-container
-       [react/view components.styles/flex
-        [status-bar/status-bar {:type :modal-wallet}]
-        [toolbar true (i18n/label :t/send-transaction)]
-        [react/i18n-text {:style styles/empty-text
-                          :key   :unsigned-transaction-expired}]]])))
+(defview select-account []
+  (letsubs [data [:commands/select-account]]
+    [bottom-panel/animated-bottom-panel
+     data
+     select-account-sheet]))

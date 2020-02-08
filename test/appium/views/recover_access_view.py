@@ -6,7 +6,21 @@ class PassphraseInput(BaseEditBox):
 
     def __init__(self, driver):
         super(PassphraseInput, self).__init__(driver)
-        self.locator = self.Locator.accessibility_id("enter-12-words")
+        self.locator = self.Locator.xpath_selector("//android.widget.EditText")
+
+
+class EnterSeedPhraseButton(BaseButton):
+
+    def __init__(self, driver):
+        super(EnterSeedPhraseButton, self).__init__(driver)
+        self.locator = self.Locator.accessibility_id("enter-seed-phrase-button")
+
+
+class ReencryptYourKeyButton(BaseButton):
+
+    def __init__(self, driver):
+        super(ReencryptYourKeyButton, self).__init__(driver)
+        self.locator = self.Locator.xpath_selector("//android.widget.TextView[@text='Re-encrypt your keys']")
 
 
 class ConfirmRecoverAccess(BaseButton):
@@ -14,6 +28,18 @@ class ConfirmRecoverAccess(BaseButton):
     def __init__(self, driver):
         super(ConfirmRecoverAccess, self).__init__(driver)
         self.locator = self.Locator.xpath_selector("//android.widget.TextView[@text='RECOVER ACCESS']")
+
+class ContinueCustomSeedPhraseButton(BaseButton):
+
+    def __init__(self, driver):
+        super(ContinueCustomSeedPhraseButton, self).__init__(driver)
+        self.locator = self.Locator.accessibility_id("continue-custom-seed-phrase")
+
+class CancelCustomSeedPhraseButton(BaseButton):
+
+    def __init__(self, driver):
+        super(CancelCustomSeedPhraseButton, self).__init__(driver)
+        self.locator = self.Locator.accessibility_id("cancel-custom-seed-phrase")
 
 
 class RequiredField(BaseElement):
@@ -72,7 +98,11 @@ class RecoverAccessView(SignInView):
         self.driver = driver
 
         self.passphrase_input = PassphraseInput(self.driver)
+        self.enter_seed_phrase_button = EnterSeedPhraseButton(self.driver)
         self.confirm_recover_access = ConfirmRecoverAccess(self.driver)
+        self.reencrypt_your_key_button = ReencryptYourKeyButton(self.driver)
         self.warnings = Warnings(self.driver)
         self.confirm_phrase_button = ConfirmPhraseButton(self.driver)
         self.cancel_button = CancelPhraseButton(self.driver)
+        self.continue_custom_seed_phrase_button = ContinueCustomSeedPhraseButton(self.driver)
+        self.cancel_custom_seed_phrase_button = CancelCustomSeedPhraseButton(self.driver)

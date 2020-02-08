@@ -1,14 +1,15 @@
 (ns status-im.node.core
   (:require [re-frame.core :as re-frame]
             [status-im.constants :as constants]
-            [status-im.fleet.core :as fleet]
+            [status-im.ethereum.json-rpc :as json-rpc]
             [status-im.native-module.core :as status]
             [status-im.utils.config :as config]
-            [status-im.utils.types :as types]
+            [status-im.utils.fx :as fx]
             [status-im.utils.platform :as utils.platform]
-            [status-im.utils.utils :as utils]
+            [status-im.utils.types :as types]
             [taoensso.timbre :as log]
-            [status-im.utils.fx :as fx]))
+            [status-im.ethereum.ens :as ens])
+  (:require-macros [status-im.utils.slurp :refer [slurp]]))
 
 (defn- add-custom-bootnodes [config network all-bootnodes]
   (let [bootnodes (as-> all-bootnodes $
@@ -22,13 +23,15 @@
 (defn- add-log-level [config log-level]
   (if (empty? log-level)
     (assoc config
+           :LogLevel "ERROR"
            :LogEnabled false)
     (assoc config
            :LogLevel log-level
            :LogEnabled true)))
 
 (defn get-network-genesis-hash-prefix
-  "returns the hex representation of the first 8 bytes of a network's genesis hash"
+  "returns the hex representation of the first 8 bytes of
+  a network's genesis hash"
   [network]
   (case network
     1 "d4e56740f876aef8"
@@ -50,9 +53,6 @@
     (cond-> {"whisper" {:Min 2, :Max 2}}
       les-topic (assoc les-topic {:Min 2, :Max 2}))))
 
-(defn get-account-network [db address]
-  (get-in db [:accounts/accounts address :network]))
-
 (defn- get-base-node-config [config]
   (let [initial-props @(re-frame/subscribe [:initial-props])
         status-node-port (get initial-props :STATUS_NODE_PORT)]
@@ -71,37 +71,33 @@
   [limit nodes]
   (take limit (shuffle nodes)))
 
-(defn get-log-level
-  [account-settings]
-  (or (:log-level account-settings)
-      (if utils.platform/desktop? ""
-          config/log-level-status-go)))
+(def default-fleets (slurp "resources/config/fleets.json"))
 
-(defn- ulc-network? [config]
-  (get-in config [:LightEthConfig :ULC] false))
+(defn fleets [{:keys [custom-fleets]}]
+  (as-> [(default-fleets)] $
+    (mapv #(:fleets (types/json->clj %)) $)
+    (conj $ custom-fleets)
+    (reduce merge $)))
 
-(defn- add-ulc-trusted-nodes [config trusted-nodes]
-  (if (ulc-network? config)
-    (-> config
-        (assoc-in [:LightEthConfig :TrustedNodes] trusted-nodes)
-        (assoc-in [:LightEthConfig :MinTrustedFraction] 50))
-    config))
+(defn current-fleet-key [db]
+  (keyword (get-in db [:multiaccount :fleet]
+                   config/fleet)))
 
-(defn- get-account-node-config [db address]
-  (let [accounts (get db :accounts/accounts)
-        current-fleet-key (fleet/current-fleet db address)
-        current-fleet (get (fleet/fleets db) current-fleet-key)
+(defn get-current-fleet
+  [db]
+  (get (fleets db)
+       (current-fleet-key db)))
+
+(defn- get-multiaccount-node-config
+  [{:keys [multiaccount :networks/networks :networks/current-network]
+    :as db}]
+  (let [current-fleet-key (current-fleet-key db)
+        current-fleet (get-current-fleet db)
         rendezvous-nodes (pick-nodes 3 (vals (:rendezvous current-fleet)))
-        {:keys [network installation-id settings bootnodes networks]}
-        (merge
-         {:network         config/default-network
-          :networks        (:networks/networks db)
-          :settings        (constants/default-account-settings)
-          :installation-id (get db :accounts/new-installation-id)}
-         (get accounts address))
-        use-custom-bootnodes (get-in settings [:bootnodes network])
-        log-level (get-log-level settings)]
-    (cond-> (get-in networks [network :config])
+        {:keys [installation-id log-level
+                custom-bootnodes custom-bootnodes-enabled?]} multiaccount
+        use-custom-bootnodes (get custom-bootnodes-enabled? current-network)]
+    (cond-> (get-in networks [current-network :config])
       :always
       (get-base-node-config)
 
@@ -110,120 +106,71 @@
              :Rendezvous    (not (empty? rendezvous-nodes))
              :ClusterConfig {:Enabled true
                              :Fleet              (name current-fleet-key)
-                             :BootNodes          (pick-nodes 4 (vals (:boot current-fleet)))
-                             :TrustedMailServers (pick-nodes 6 (vals (:mail current-fleet)))
-                             :StaticNodes        (into (pick-nodes 2 (vals (:whisper current-fleet))) (vals (:static current-fleet)))
+                             :BootNodes
+                             (pick-nodes 4 (vals (:boot current-fleet)))
+                             :TrustedMailServers
+                             (pick-nodes 6 (vals (:mail current-fleet)))
+                             :StaticNodes
+                             (into (pick-nodes 2
+                                               (vals (:whisper current-fleet)))
+                                   (vals (:static current-fleet)))
                              :RendezvousNodes    rendezvous-nodes})
 
       :always
-      (assoc :WhisperConfig           {:Enabled true
-                                       :LightClient true
-                                       :MinimumPoW 0.001
-                                       :EnableNTPSync true}
-             :ShhextConfig        {:BackupDisabledDataDir      (utils.platform/no-backup-directory)
-                                   :InstallationID             installation-id
-                                   :MaxMessageDeliveryAttempts config/max-message-delivery-attempts
-                                   :MailServerConfirmations    config/mailserver-confirmations-enabled?
-                                   :PFSEnabled              true}
-             :RequireTopics           (get-topics network))
+      (assoc :WalletConfig {:Enabled true}
+             :BrowsersConfig {:Enabled true}
+             :PermissionsConfig {:Enabled true}
+             :MailserversConfig {:Enabled true}
+             :EnableNTPSync true
+             :WhisperConfig {:Enabled true
+                             :LightClient true
+                             :MinimumPoW 0.001}
+             :ShhextConfig
+             {:BackupDisabledDataDir      (utils.platform/no-backup-directory)
+              :InstallationID             installation-id
+              :MaxMessageDeliveryAttempts config/max-message-delivery-attempts
+              :MailServerConfirmations    config/mailserver-confirmations-enabled?
+              :VerifyTransactionURL       constants/mainnet-rpc-url
+              :VerifyENSURL               constants/mainnet-rpc-url
+              :VerifyENSContractAddress   (:mainnet ens/ens-registries)
+              :VerifyTransactionChainID   1
+              :DataSyncEnabled            true
+              :PFSEnabled                 true}
+             :RequireTopics (get-topics current-network)
+             :StatusAccountsConfig {:Enabled true})
 
       (and
        config/bootnodes-settings-enabled?
        use-custom-bootnodes)
-      (add-custom-bootnodes network bootnodes)
-
-      :always
-      (add-ulc-trusted-nodes (vals (:static current-fleet)))
+      (add-custom-bootnodes current-network custom-bootnodes)
 
       :always
       (add-log-level log-level))))
 
-(defn get-verify-account-config
-  "Is used when the node has to be started before
-  `VerifyAccountPassword` call."
-  [db network]
-  (-> (get-in (:networks/networks db) [network :config])
-      (get-base-node-config)
+(defn get-new-config
+  [db]
+  (types/clj->json (get-multiaccount-node-config db)))
 
-      (assoc :ShhextConfig {:BackupDisabledDataDir (utils.platform/no-backup-directory)})
-      (assoc :PFSEnabled false
-             :NoDiscovery true)
-      (add-log-level config/log-level-status-go)))
+(fx/defn save-new-config
+  "Saves a new status-go config for the current account
+   This RPC method is the only way to change the node config of an account.
+   NOTE: it is better used indirectly through `prepare-new-config`,
+    which will take care of building up the proper config based on settings in
+app-db"
+  {:events [::save-new-config]}
+  [{:keys [db]} config {:keys [on-success]}]
+  {::json-rpc/call [{:method "settings_saveSetting"
+                     :params [:node-config config]
+                     :on-success on-success}]})
 
-(fx/defn update-sync-state
-  [{:keys [db]} error sync-state]
-  {:db (assoc db :node/chain-sync-state
-              (if error
-                {:error error}
-                (when sync-state (js->clj sync-state :keywordize-keys true))))})
-
-(fx/defn update-block-number
-  [{:keys [db]} error block-number]
-  (when-not error
-    {:db (assoc db :node/latest-block-number block-number)}))
-
-(fx/defn start
-  [{:keys [db]} address]
-  (let [network     (if address
-                      (get-account-network db address)
-                      (:network db))
-        node-config (if (= (:node/on-ready db) :verify-account)
-                      (get-verify-account-config db network)
-                      (get-account-node-config db address))
-        node-config-json (types/clj->json node-config)]
-    (log/info "Node config: " node-config-json)
-    {:db        (assoc db
-                       :network network
-                       :node/status :starting)
-     :node/start node-config-json}))
-
-(fx/defn stop
-  [{:keys [db]}]
-  {:db        (assoc db :node/status :stopping)
-   :node/stop nil})
-
-(fx/defn initialize
-  [{{:node/keys [status] :as db} :db :as cofx} address]
-  (let [restart {:db (assoc db :node/restart? true :node/address address)}]
-    (case status
-      :started nil
-      :starting restart
-      :stopping restart
-      (start cofx address))))
+(fx/defn prepare-new-config
+  "Use this function to apply settings to the current account node config"
+  [{:keys [db]} {:keys [on-success]}]
+  {::prepare-new-config [(get-new-config db)
+                         #(re-frame/dispatch
+                           [::save-new-config % {:on-success on-success}])]})
 
 (re-frame/reg-fx
- :node/start
- (fn [config]
-   (status/start-node config)))
-
-(re-frame/reg-fx
- :node/ready
- (fn [config]
-   (status/node-ready)))
-
-(re-frame/reg-fx
- :node/stop
- (fn []
-   (status/stop-node)))
-
-(re-frame/reg-fx
- :node/les-show-debug-info
- (fn [[web3 account chain-sync-state]]
-   (.getBalance
-    (.-eth web3)
-    (:address account)
-    (fn [error-balance balance]
-      (.getBlockNumber
-       (.-eth web3)
-       (fn
-         [error-block block]
-         (utils/show-popup
-          "LES sync status"
-          (str
-           "* account="        (:address account) "\n"
-           "* latest block="   (or error-block block) "\n"
-           "* balance="        (or error-balance balance) "\n"
-           "* eth_getSyncing=" (or chain-sync-state "false")))))))))
-
-(defn display-les-debug-info [{{:keys [web3] :account/keys [account] :node/keys [chain-sync-state]} :db}]
-  {:node/les-show-debug-info [web3 account]})
+ ::prepare-new-config
+ (fn [[config callback]]
+   (status/prepare-dir-and-update-config config callback)))

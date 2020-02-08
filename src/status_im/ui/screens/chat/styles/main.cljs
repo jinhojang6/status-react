@@ -1,17 +1,12 @@
 (ns status-im.ui.screens.chat.styles.main
-  (:require-macros [status-im.utils.styles :refer [defstyle defnstyle]])
-  (:require [status-im.ui.components.styles :as component.styles]
-            [status-im.ui.components.colors :as colors]))
-
-(def scroll-root
-  {:flex 1})
+  (:require [status-im.ui.components.colors :as colors]))
 
 (def chat-view
-  {:flex             1
-   :background-color colors/white})
+  {:flex             1})
 
 (def toolbar-container
   {:flex           1
+   :align-items    :center
    :flex-direction :row})
 
 (def messages-container
@@ -45,8 +40,9 @@
    :justify-content :center})
 
 (def chat-name-text
-  {:typography :main-medium
-   :margin-top -3})
+  {:typography  :main-medium
+   :font-size   15
+   :line-height 22})
 
 (def group-icon
   {:margin-top    4
@@ -56,6 +52,7 @@
 
 (def toolbar-subtitle
   {:typography  :caption
+   :line-height 16
    :color       colors/text-gray})
 
 (def last-activity-text
@@ -165,35 +162,25 @@
 (def add-contact
   {:flex-direction      :row
    :align-items         :center
-   :height              36
+   :justify-content     :center
+   :padding-vertical    6
    :border-bottom-width 1
-   :justify-content :center
    :border-color        colors/gray-lighter})
 
-(def add-contact-center
-  {:flex-direction :row})
-
 (def add-contact-text
-  {:text-align          :center
-   :text-align-vertical :center
-   :padding-left        4
-   :color               colors/blue})
+  {:margin-left 4
+   :color       colors/blue})
 
 (def add-contact-close-icon
   {:margin-right 12})
 
-(def message-view-preview
-  {:flex            1
-   :align-items     :center
-   :justify-content :center})
-
 (defn message-view-animated [opacity]
-  {:opacity opacity
-   :flex    1})
+  {:opacity          opacity
+   :flex             1
+   :background-color :white})
 
 (def empty-chat-container
   {:flex             1
-   :flex-direction   :column
    :justify-content  :center
    :align-items      :center
    :padding-vertical 50
@@ -207,13 +194,11 @@
        :flex-direction     :column
        :justify-content    :center
        :align-items        :center
-       :height             adjusted-height
-       :padding-horizontal 32}
+       :height             adjusted-height}
       {:flex               1
        :flex-direction     :column
        :justify-content    :center
-       :align-items        :center
-       :padding-horizontal 32})))
+       :align-items        :center})))
 
 (defn intro-header-icon [diameter color]
   {:width            diameter
@@ -231,22 +216,36 @@
    :line-height 72})
 
 (def intro-header-chat-name
-  {:font-size     22
-   :font-weight   "700"
-   :line-height   28
-   :text-align    :center
-   :margin-bottom 8
-   :color         colors/black})
+  {:font-size         22
+   :font-weight       "700"
+   :line-height       28
+   :text-align        :center
+   :margin-bottom     8
+   :margin-horizontal 32
+   :color             colors/black})
 
 (def intro-header-description-container
-  {:flex-wrap      :wrap
-   :align-items    :flex-start
-   :flex-direction :row})
+  {:flex-wrap         :wrap
+   :align-items       :flex-start
+   :flex-direction    :row
+   :margin-horizontal 32})
+
+(def loading-text
+  {:color          colors/gray
+   :font-size      15
+   :line-height    22
+   :letter-spacing -0.2
+   :margin-right   4
+   :text-align     :center})
+
+(def empty-chat-text-name
+  {:margin-bottom 5})
 
 (def intro-header-description
-  {:color         colors/gray
-   :line-height   22
-   :text-align    :center})
+  {:color             colors/gray
+   :line-height       22
+   :text-align        :center
+   :margin-horizontal 32})
 
 (def group-chat-icon
   {:color       colors/white
@@ -271,3 +270,37 @@
 (def decline-chat
   {:color colors/blue
    :margin-bottom 40})
+
+(def select-chat
+  {:color colors/gray})
+
+(def messages-list-vertical-padding 46)
+
+(def are-you-friends-bubble
+  {:border-radius      8
+   :border-width       1
+   :margin-top         4
+   :border-color       colors/gray-lighter
+   :align-self         :flex-start
+   :padding-vertical   12
+   :margin-horizontal  8
+   :padding-horizontal 16
+   :margin-bottom      50})
+
+(def are-you-friends-text
+  {:line-height 22
+   :text-align  :center
+   :font-size   15
+   :color       colors/gray})
+
+(def share-my-profile
+  {:color       colors/blue
+   :text-align  :center
+   :margin-top  11
+   :line-height 22
+   :font-size   15})
+
+(def tribute-received-note
+  {:font-size 13
+   :line-height 18
+   :text-align :center})

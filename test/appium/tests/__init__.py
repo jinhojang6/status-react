@@ -23,7 +23,7 @@ def get_current_time():
 def debug(text: str):
     logging.debug(text)
 
-
+pytest_config_global = dict()
 test_suite_data = TestSuiteData()
 appium_container = AppiumContainer()
 
@@ -32,9 +32,14 @@ unique_password = 'unique' + get_current_time()
 
 bootnode_address = "enode://a8a97f126f5e3a340cb4db28a1187c325290ec08b2c9a6b1f19845ac86c46f9fac2ba13328822590" \
                    "fd3de3acb09cc38b5a05272e583a2365ad1fa67f66c55b34@167.99.210.203:30404"
-mailserver_address = "enode://531e252ec966b7e83f5538c19bf1cde7381cc7949026a6e499b6e998e695751aadf26d4c98d5a4eab" \
-                     "fb7cefd31c3c88d600a775f14ed5781520a88ecd25da3c6:status-offline-inbox@35.225.227.79:30504"
-
+mailserver_address = "enode://ee2b53b0ace9692167a410514bca3024695dbf0e1a68e1dff9716da620efb195f04a4b9e873fb9b74ac84de80" \
+                     "1106c465b8e2b6c4f0d93b8749d1578bfcaf03e@104.197.238.144:443"
+staging_fleet = 'eth.staging'
+prod_fleet = 'eth.prod'
+mailserver_ams = 'mail-01.do-ams3'
+mailserver_hk = 'mail-01.ac-cn-hongkong-c'
+mailserver_gc = 'mail-01.gc-us-central1-a'
+mailserver_ams_01 = 'mail-01.do-ams3.eth.beta'
 camera_access_error_text = "To grant the required camera permission, please go to your system settings " \
                            "and make sure that Status > Camera is selected."
 
@@ -45,3 +50,6 @@ connection_not_secure_text = "Connection is not secure! " \
                              "Do not sign transactions or send personal data on this site."
 connection_is_secure_text = "Connection is secure. Make sure you really trust this site " \
                             "before signing transactions or entering personal data."
+
+test_dapp_url = 'status-im.github.io/dapp'
+test_dapp_name = 'status-im.github.io'

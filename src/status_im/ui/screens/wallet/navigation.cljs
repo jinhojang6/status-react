@@ -1,49 +1,23 @@
 (ns status-im.ui.screens.wallet.navigation
-  (:require [re-frame.core :as re-frame]
-            [status-im.ui.screens.navigation :as navigation]
-            [status-im.utils.ethereum.core :as ethereum]
-            [status-im.constants :as constants]))
-
-(defmethod navigation/preload-data! :wallet
-  [db _]
-  ;;TODO(goranjovic) - get rid of this preload hook completely
-  (re-frame/dispatch [:wallet.ui/pull-to-refresh])
-  (re-frame/dispatch [:update-wallet])
-  (assoc-in db [:wallet :current-tab] 0))
+  (:require [status-im.ui.screens.navigation :as navigation]
+            [status-im.ui.screens.wallet.signing-phrase.views :as signing-phrase]
+            [re-frame.core :as re-frame]))
 
 (defmethod navigation/preload-data! :wallet-stack
-  [db _]
-  ;;TODO(goranjovic) - get rid of this preload hook completely
-  (re-frame/dispatch [:wallet.ui/pull-to-refresh])
-  (re-frame/dispatch [:update-wallet])
-  (assoc-in db [:wallet :current-tab] 0))
-
-(defmethod navigation/preload-data! :transactions-history
-  [db _]
-  (re-frame/dispatch [:update-transactions])
-  db)
-
-(def transaction-send-default
-  (let [symbol :ETH]
-    {:gas    (ethereum/estimate-gas symbol)
-     :method constants/web3-send-transaction
-     :symbol symbol}))
-
-(def transaction-request-default
-  {:symbol :ETH})
-
-(defmethod navigation/preload-data! :wallet-request-transaction
   [db [event]]
-  (if (= event :navigate-back)
-    db
-    (-> db
-        (assoc-in [:wallet :request-transaction] transaction-request-default)
-        (assoc-in [:wallet :send-transaction] transaction-send-default))))
+  (let [wallet-set-up-passed? (get-in db [:multiaccount :wallet-set-up-passed?])
+        sign-phrase-showed?   (get db :wallet/sign-phrase-showed?)]
+    ;;TODO temporary simple fix for v1
+    (re-frame/dispatch [:wallet.ui/pull-to-refresh])
+    (if (or (= event :navigate-back) wallet-set-up-passed? sign-phrase-showed?)
+      db
+      (assoc db :popover/popover {:view [signing-phrase/signing-phrase]}
+             :wallet/sign-phrase-showed? true))))
 
-(defmethod navigation/preload-data! :wallet-send-transaction
+(defmethod navigation/preload-data! :wallet-add-custom-token
   [db [event]]
-  (if (= event :navigate-back)
-    db
-    (do
-      (re-frame/dispatch [:wallet/update-gas-price])
-      (assoc-in db [:wallet :send-transaction] transaction-send-default))))
+  (dissoc db :wallet/custom-token-screen))
+
+(defmethod navigation/preload-data! :add-new-account
+  [db [event]]
+  (dissoc db :add-account))

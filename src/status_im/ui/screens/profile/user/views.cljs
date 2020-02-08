@@ -1,348 +1,245 @@
 (ns status-im.ui.screens.profile.user.views
-  (:require-macros [status-im.utils.views :refer [defview letsubs]])
   (:require [re-frame.core :as re-frame]
             [reagent.core :as reagent]
-            [status-im.ui.components.list.views :as list.views]
             [status-im.i18n :as i18n]
-            [status-im.ui.components.action-button.styles :as action-button.styles]
-            [status-im.ui.components.button.view :as button]
+            [status-im.multiaccounts.core :as multiaccounts]
+            [status-im.ui.components.button :as button]
             [status-im.ui.components.colors :as colors]
-            [status-im.ui.components.common.styles :as common.styles]
-            [status-im.ui.components.icons.vector-icons :as vector-icons]
+            [status-im.ui.components.common.common :as components.common]
+            [status-im.ui.components.copyable-text :as copyable-text]
+            [status-im.ui.components.large-toolbar.view :as large-toolbar]
             [status-im.ui.components.list-selection :as list-selection]
+            [status-im.ui.components.list.views :as list.views]
             [status-im.ui.components.qr-code-viewer.views :as qr-code-viewer]
             [status-im.ui.components.react :as react]
-            [status-im.ui.components.status-bar.view :as status-bar]
+            [status-im.ui.components.tabbar.styles :as tabs.styles]
             [status-im.ui.components.toolbar.view :as toolbar]
-            [status-im.ui.components.toolbar.actions :as toolbar.actions]
-            [status-im.ui.components.toolbar.styles :as toolbar.styles]
+            [status-im.ui.screens.chat.photos :as photos]
             [status-im.ui.screens.profile.components.views :as profile.components]
-            [status-im.ui.screens.profile.components.styles :as profile.components.styles]
             [status-im.ui.screens.profile.user.styles :as styles]
-            [status-im.utils.build :as build]
-            [status-im.utils.config :as config]
             [status-im.utils.platform :as platform]
-            [status-im.utils.utils :as utils]
-            [status-im.ui.components.icons.vector-icons :as icons]
-            [status-im.ui.components.common.common :as components.common]
-            [status-im.utils.identicon :as identicon]
-            [clojure.string :as string]
-            [status-im.utils.universal-links.core :as universal-links]))
+            [status-im.utils.config :as config]
+            [status-im.utils.universal-links.core :as universal-links]
+            [status-im.ui.components.animation :as animation])
+  (:require-macros [status-im.utils.views :as views]))
 
-(defn my-profile-toolbar []
-  [toolbar/toolbar
-   {}
-   nil
-   nil
-   [toolbar/text-action
-    {:handler            #(re-frame/dispatch [:my-profile/start-editing-profile])
-     :accessibility-label :edit-button}
-    (i18n/label :t/edit)]])
+(views/defview share-chat-key []
+  (views/letsubs [{:keys [address ens-name]}     [:popover/popover]
+                  width                          (reagent/atom nil)]
+    (let [link (universal-links/generate-link :user :external (or ens-name address))]
+      [react/view {:on-layout #(reset! width (-> % .-nativeEvent .-layout .-width))}
+       [react/view {:style {:padding-top 16 :padding-horizontal 16}}
+        (when @width
+          [qr-code-viewer/qr-code-view (- @width 32) address])
+        (when ens-name
+          [react/view
+           [copyable-text/copyable-text-view
+            {:label           :t/ens-username
+             :container-style {:margin-top 12 :margin-bottom 4}
+             :copied-text     ens-name}
+            [react/nested-text
+             {:style               {:line-height 22 :font-size 15
+                                    :font-family "monospace"}
+              :accessibility-label :ens-username}
+             ens-name]]
+           [react/view {:height           1 :margin-top 12 :margin-horizontal -16
+                        :background-color colors/gray-lighter}]])
+        [copyable-text/copyable-text-view
+         {:label           :t/chat-key
+          :container-style {:margin-top 12 :margin-bottom 4}
+          :copied-text     address}
+         [react/text {:number-of-lines     1
+                      :ellipsize-mode      :middle
+                      :accessibility-label :chat-key
+                      :style               {:line-height 22 :font-size 15
+                                            :font-family "monospace"}}
+          address]]]
+       [react/view styles/share-link-button
+        ;;TODO implement icon support
+        [button/button
+         {:on-press            #(list-selection/open-share {:message link})
+          :label               :t/share-link
+                                        ;:icon                :main-icons/link
+          :accessibility-label :share-my-contact-code-button}]]])))
 
-(defn my-profile-edit-toolbar [on-show]
-  (reagent/create-class
-   {:component-did-mount on-show
-    :reagent-render (fn []
-                      [toolbar/toolbar
-                       {}
-                       nil
-                       nil
-                       [toolbar/text-action
-                        {:handler             #(re-frame/dispatch [:my-profile/save-profile])
-                         :accessibility-label :done-button}
-                        (i18n/label :t/done)]])}))
+(defn- header [{:keys [photo-path] :as account} photo-added?]
+  [profile.components/profile-header
+   {:contact                account
+    ;;set to true if we want to re-enable custom icon
+    :allow-icon-change?     false
+    :include-remove-action?  photo-added?}])
 
-(def profile-icon-options
-  [{:label  (i18n/label :t/image-source-gallery)
-    :action #(re-frame/dispatch [:my-profile/update-picture])}
-   {:label  (i18n/label :t/image-source-make-photo)
-    :action (fn []
-              (re-frame/dispatch [:request-permissions {:permissions [:camera :write-external-storage]
-                                                        :on-allowed  #(re-frame/dispatch [:navigate-to :profile-photo-capture])
-                                                        :on-denied   (fn []
-                                                                       (utils/set-timeout
-                                                                        #(utils/show-popup (i18n/label :t/error)
-                                                                                           (i18n/label :t/camera-access-error))
-                                                                        50))}]))}])
+(defn- header-in-toolbar [account]
+  (let [displayed-name (multiaccounts/displayed-name account)]
+    [react/view {:flex           1
+                 :flex-direction :row
+                 :align-items    :center
+                 :align-self     :stretch}
+     ;;TODO this should be done in a subscription
+     [photos/photo (multiaccounts/displayed-photo account) {:size 40}]
+     [react/text {:style {:typography   :title-bold
+                          :line-height  21
+                          :margin-right 40
+                          :margin-left  16
+                          :text-align   :left}}
+      displayed-name]]))
 
-(defn- profile-icon-options-ext []
-  (conj profile-icon-options {:label  (i18n/label :t/image-remove-current)
-                              :action #(re-frame/dispatch [:my-profile/remove-current-photo])}))
+(defn- toolbar-action-items [public-key ens-name]
+  [toolbar/actions
+   [{:icon      :main-icons/share
+     :icon-opts {:width  24
+                 :height 24}
+     :handler   #(re-frame/dispatch [:show-popover
+                                     {:view :share-chat-key
+                                      :address public-key
+                                      :ens-name ens-name}])}]])
 
-(defn qr-viewer-toolbar [label value]
-  [toolbar/toolbar nil
-   (toolbar/nav-button
-    (toolbar.actions/close toolbar.actions/default-handler))
-   [toolbar/content-title label]])
-
-(defn qr-code-share-button [value]
-  (let [link (universal-links/generate-link :user :external value)]
-    [button/button-with-icon
-     {:on-press            #(list-selection/open-share {:message link})
-      :label               (i18n/label :t/share-link)
-      :icon                :main-icons/share
-      :accessibility-label :share-my-contact-code-button
-      :style               styles/share-link-button}]))
-
-(defview qr-viewer []
-  (letsubs [{:keys [value contact]} [:get :qr-modal]]
-    [react/view styles/qr-code-viewer
-     [status-bar/status-bar {:type :modal-white}]
-     [qr-viewer-toolbar (:name contact) value]
-     [qr-code-viewer/qr-code-viewer
-      {:style         styles/qr-code
-       :footer-button qr-code-share-button
-       :value         value
-       :hint          (i18n/label :t/qr-code-public-key-hint)
-       :legend        (str value)}]]))
-
-(defn- show-qr [contact source value]
-  #(re-frame/dispatch [:navigate-to :profile-qr-viewer {:contact contact
-                                                        :source  source
-                                                        :value   value}]))
-
-(defn- my-profile-settings [{:keys [seed-backed-up? mnemonic]}
-                            {:keys [dev-mode?
-                                    settings]}
-                            currency
-                            logged-in?
-                            extensions]
-  (let [show-backup-seed? (and (not seed-backed-up?) (not (string/blank? mnemonic)))
-        extensions-settings (vals (get extensions :settings))]
-    [react/view
-     [profile.components/settings-title (i18n/label :t/settings)]
-     [profile.components/settings-item {:label-kw            :t/ens-names
-                                        :action-fn           #(re-frame/dispatch [:profile.ui/ens-names-button-pressed])
-                                        :accessibility-label :ens-names-button}]
-     [profile.components/settings-item-separator]
-     [profile.components/settings-item {:label-kw            :t/main-currency
-                                        :value               (:code currency)
-                                        :action-fn           #(re-frame/dispatch [:navigate-to :currency-settings])
-                                        :accessibility-label :currency-button}]
-     [profile.components/settings-item-separator]
-     (when (and config/hardwallet-enabled?
-                platform/android?)
-       [profile.components/settings-item {:label-kw            :t/status-keycard
-                                          :accessibility-label :keycard-button
-                                          :action-fn           #(re-frame/dispatch [:profile.ui/keycard-settings-button-pressed])}])
-     [profile.components/settings-item {:label-kw            :t/notifications
-                                        :accessibility-label :notifications-button
-                                        :action-fn           #(.openURL react/linking "app-settings://notification/status-im")}]
-     [profile.components/settings-item-separator]
-     [profile.components/settings-item {:label-kw            :t/mobile-network-settings
-                                        :accessibility-label :notifications-button
-                                        :action-fn            #(re-frame/dispatch [:navigate-to :mobile-network-settings])}]
-     (when show-backup-seed?
-       [profile.components/settings-item-separator])
-     (when show-backup-seed?
-       [profile.components/settings-item
-        {:label-kw     :t/backup-your-recovery-phrase
-         :accessibility-label :back-up-recovery-phrase-button
-         :action-fn    #(re-frame/dispatch [:navigate-to :backup-seed])
-         :icon-content [components.common/counter {:size 22} 1]}])
-     [profile.components/settings-item-separator]
-     [profile.components/settings-item
-      {:label-kw            :t/devices
-       :action-fn           #(re-frame/dispatch [:navigate-to :installations])
-       :accessibility-label :pairing-settings-button}]
-     [profile.components/settings-item-separator]
-     [profile.components/settings-switch-item
-      {:label-kw  :t/web3-opt-in
-       :value     (or (nil? (:web3-opt-in? settings)) (:web3-opt-in? settings))
-       :action-fn #(re-frame/dispatch [:accounts.ui/web3-opt-in-mode-switched %])}]
-     [profile.components/settings-item-separator]
-     [profile.components/settings-item
-      {:label-kw            :t/dapps-permissions
-       :accessibility-label :dapps-permissions-button
-       :action-fn           #(re-frame/dispatch [:navigate-to :dapps-permissions])}]
-     (when extensions-settings
-       (for [{:keys [label] :as st} extensions-settings]
-         [react/view
-          [profile.components/settings-item-separator]
-          [profile.components/settings-item
-           {:item-text           label
-            :action-fn           #(re-frame/dispatch [:navigate-to :my-profile-ext-settings st])}]]))
-     [profile.components/settings-item-separator]
-     [profile.components/settings-item
-      {:label-kw            :t/need-help
-       :accessibility-label :help-button
-       :action-fn           #(re-frame/dispatch [:navigate-to :help-center])}]
-     [profile.components/settings-item-separator]
-     [profile.components/settings-item
-      {:label-kw            :t/about-app
-       :accessibility-label :about-button
-       :action-fn           #(re-frame/dispatch [:navigate-to :about-app])}]
-     [profile.components/settings-item-separator]
-     [react/view styles/my-profile-settings-logout-wrapper
-      [react/view styles/my-profile-settings-logout
-       [profile.components/settings-item {:label-kw            :t/logout
-                                          :accessibility-label :log-out-button
-                                          :destructive?        true
-                                          :hide-arrow?         true
-                                          :active?             logged-in?
-                                          :action-fn           #(re-frame/dispatch [:accounts.logout.ui/logout-pressed])}]]]]))
-
-(defview advanced-settings [{:keys [network networks dev-mode? settings]} on-show]
-  {:component-did-mount on-show}
-  [react/view
-   (when (and config/extensions-enabled? dev-mode?)
-     [profile.components/settings-item
-      {:label-kw            :t/extensions
-       :action-fn           #(re-frame/dispatch [:navigate-to :extensions-settings])
-       :accessibility-label :extensions-button}])
-   (when dev-mode?
-     [profile.components/settings-item
-      {:label-kw            :t/network
-       :value               (get-in networks [network :name])
-       :action-fn           #(re-frame/dispatch [:navigate-to :network-settings])
-       :accessibility-label :network-button}])
-   [profile.components/settings-item-separator]
-   [profile.components/settings-item
-    {:label-kw            :t/offline-messaging
-     :action-fn           #(re-frame/dispatch [:navigate-to :offline-messaging-settings])
-     :accessibility-label :offline-messages-settings-button}]
-   [profile.components/settings-item-separator]
-   [profile.components/settings-item
-    {:label-kw            :t/log-level
-     :action-fn           #(re-frame/dispatch [:navigate-to :log-level-settings])
-     :accessibility-label :log-level-settings-button}]
-   (when (and dev-mode? (not platform/ios?))
-     [react/view styles/my-profile-settings-send-logs-wrapper
-      [react/view styles/my-profile-settings-send-logs
-       [profile.components/settings-item {:label-kw            :t/send-logs
-                                          :destructive?        true
-                                          :hide-arrow?         true
-                                          :action-fn           #(re-frame/dispatch [:logging.ui/send-logs-pressed])}]]])
-   [profile.components/settings-item-separator]
-   [profile.components/settings-item
-    {:label-kw            :t/fleet
-     :action-fn           #(re-frame/dispatch [:navigate-to :fleet-settings])
-     :accessibility-label :fleet-settings-button}]
-   (when config/bootnodes-settings-enabled?
-     [profile.components/settings-item-separator])
-   (when config/bootnodes-settings-enabled?
-     [profile.components/settings-item
-      {:label-kw            :t/bootnodes
-       :action-fn           #(re-frame/dispatch [:navigate-to :bootnodes-settings])
-       :accessibility-label :bootnodes-settings-button}])
-   (when (and dev-mode? config/pfs-toggle-visible?)
-     [profile.components/settings-item-separator])
-   (when (and dev-mode? config/pfs-toggle-visible?)
-     [profile.components/settings-switch-item
-      {:label-kw  :t/pfs
-       :value     (:pfs? settings)
-       :action-fn #(re-frame/dispatch [:accounts.ui/toggle-pfs %])}])
-   [profile.components/settings-item-separator]
-   [profile.components/settings-switch-item
-    {:label-kw  :t/dev-mode
-     :value     dev-mode?
-     :action-fn #(re-frame/dispatch [:accounts.ui/dev-mode-switched %])}]
-   [profile.components/settings-item-separator]
-   [profile.components/settings-switch-item
-    {:label-kw  :t/chaos-mode
-     :value     (:chaos-mode? settings)
-     :action-fn #(re-frame/dispatch [:accounts.ui/chaos-mode-switched %])}]])
-
-(defview advanced [params on-show]
-  (letsubs [advanced? [:get :my-profile/advanced?]]
-    {:component-will-unmount #(re-frame/dispatch [:set :my-profile/advanced? false])}
-    [react/view {:padding-bottom 16}
-     [react/touchable-highlight {:on-press #(re-frame/dispatch [:set :my-profile/advanced? (not advanced?)])
-                                 :style    styles/advanced-button}
-      [react/view {:style styles/advanced-button-container}
-       [react/view {:style styles/advanced-button-container-background}
-        [react/view {:style styles/advanced-button-row}
-         [react/text {:style styles/advanced-button-label}
-          (i18n/label :t/wallet-advanced)]
-         [icons/icon (if advanced? :main-icons/dropdown-up :main-icons/dropdown) {:color colors/blue}]]]]]
-     (when advanced?
-       [advanced-settings params on-show])]))
-
-(defn share-profile-item
-  [{:keys [public-key photo-path] :as current-account}]
+(defn tribute-to-talk-item
+  [opts]
   [list.views/big-list-item
-   {:text                (i18n/label :t/share-my-profile)
-    :icon                :main-icons/share
-    :accessibility-label :share-my-profile-button
-    :action-fn           #(re-frame/dispatch [:navigate-to :profile-qr-viewer
-                                              {:contact current-account
-                                               :source  :public-key
-                                               :value   public-key}])}])
+   (merge {:text                (i18n/label :t/tribute-to-talk)
+           :accessibility-label :notifications-button
+           :action-fn           #(re-frame/dispatch
+                                  [:tribute-to-talk.ui/menu-item-pressed])}
+          opts)])
 
-(defn contacts-list-item [active-contacts-count]
-  [list.views/big-list-item
-   {:text            (i18n/label :t/contacts)
+(defn- flat-list-content
+  [preferred-name registrar tribute-to-talk
+   active-contacts-count mnemonic
+   keycard-account? notifications-enabled?]
+  [(cond-> {:title                (or (when registrar preferred-name)
+                                      :t/ens-usernames)
+            :subtitle             (if registrar
+                                    (if preferred-name
+                                      :t/ens-your-your-name
+                                      :t/ens-usernames-details)
+                                    :t/ens-network-restriction)
+            :subtitle-max-lines   (if registrar
+                                    (if preferred-name 1 2)
+                                    1)
+            :accessibility-label  :ens-button
+            :container-margin-top 8
+            :disabled?            (not registrar)
+            :accessories          [:chevron]
+            :icon                 :main-icons/username}
+     registrar
+     (assoc :on-press #(re-frame/dispatch [:navigate-to :ens-main registrar])))
+   ;; TODO replace this with list-item config map
+   ;; left it as it is because not sure how to enable it for testing
+   (when tribute-to-talk [tribute-to-talk-item tribute-to-talk])
+   {:title               :t/contacts
     :icon                :main-icons/in-contacts
-    :accessibility-label :notifications-button
-    :accessory-value     active-contacts-count
-    :action-fn           #(re-frame/dispatch [:navigate-to :contacts-list])}])
+    :accessibility-label :contacts-button
+    :accessories         [(if (pos? active-contacts-count)
+                            (str active-contacts-count)
+                            :t/none)
+                          :chevron]
+    :on-press            #(re-frame/dispatch [:navigate-to :contacts-list])}
+   {:type                 :section-header
+    :accessibility-label  :settings-section
+    :container-margin-top 16
+    :title                :t/settings}
+   {:icon                :main-icons/security
+    :title               :t/privacy-and-security
+    :accessibility-label :privacy-and-security-settings-button
+    :accessories
+    [(when mnemonic
+       [components.common/counter {:size 22} 1]) :chevron]
+    :on-press            #(re-frame/dispatch [:navigate-to :privacy-and-security])}
+   (when (and platform/android?
+              config/local-notifications?)
+     {:icon                :main-icons/notification
+      :title               :t/notifications
+      :accessibility-label :notifications-button
+      :on-press
+      #(re-frame/dispatch
+        [:multiaccounts.ui/notifications-switched (not notifications-enabled?)])
+      :accessories
+      [[react/switch
+        {:track-color #js {:true colors/blue :false nil}
+         :value       notifications-enabled?
+         :on-value-change
+         #(re-frame/dispatch
+           [:multiaccounts.ui/notifications-switched
+            (not notifications-enabled?)])
+         :disabled    false}]]})
+   {:icon                :main-icons/mobile
+    :title               :t/sync-settings
+    :accessibility-label :sync-settings-button
+    :accessories         [:chevron]
+    :on-press            #(re-frame/dispatch [:navigate-to :sync-settings])}
+   (when (and platform/android?
+              config/hardwallet-enabled?
+              keycard-account?)
+     {:icon                :main-icons/keycard
+      :title               :t/keycard
+      :accessibility-label :keycard-button
+      :accessories         [:chevron]
+      :on-press            #(re-frame/dispatch [:navigate-to :keycard-settings])})
+   {:icon                :main-icons/settings-advanced
+    :title               :t/advanced
+    :accessibility-label :advanced-button
+    :accessories         [:chevron]
+    :on-press            #(re-frame/dispatch [:navigate-to :advanced-settings])}
+   {:icon                :main-icons/help
+    :title               :t/need-help
+    :accessibility-label :help-button
+    :accessories         [:chevron]
+    :on-press            #(re-frame/dispatch [:navigate-to :help-center])}
+   {:icon                :main-icons/info
+    :title               :t/about-app
+    :accessibility-label :about-button
+    :accessories         [:chevron]
+    :on-press            #(re-frame/dispatch [:navigate-to :about-app])}
+   {:icon                    :main-icons/log_out
+    :title                   :t/sign-out
+    :accessibility-label     :log-out-button
+    :container-margin-top    24
+    :container-margin-bottom 24
+    :theme                   :action-destructive
+    :on-press
+    #(re-frame/dispatch [:multiaccounts.logout.ui/logout-pressed])}])
 
-(defn tribute-to-talk-item [snt-amount seen?]
-  [list.views/big-list-item
-   (cond-> {:text                (i18n/label :t/tribute-to-talk)
-            :icon                :main-icons/tribute-to-talk
-            :accessibility-label :notifications-button
-            :new?                (not seen?)
-            :action-fn           #(re-frame/dispatch
-                                   [:tribute-to-talk.ui/menu-item-pressed])}
-     snt-amount
-     (assoc :accessory-value (str snt-amount " SNT"))
-     (not (and seen? snt-amount))
-     (assoc :subtext (i18n/label :t/tribute-to-talk-desc)))])
+(defn minimized-toolbar-handler [anim-opacity]
+  (let [{:keys [public-key preferred-name]
+         :as   multiaccount}         @(re-frame/subscribe [:multiaccount])]
+    [large-toolbar/minimized-toolbar-handler
+     (header-in-toolbar multiaccount)
+     nil
+     (toolbar-action-items public-key preferred-name)
+     anim-opacity]))
 
-(defview extensions-settings []
-  (letsubs [{:keys [label view on-close]} [:get-screen-params :my-profile-ext-settings]]
-    [react/keyboard-avoiding-view {:style {:flex 1}}
-     [status-bar/status-bar {:type :main}]
-     [toolbar/simple-toolbar label]
-     [react/scroll-view
-      [view]]]))
+(defn content-with-header [list-ref scroll-y]
+  (let [{:keys [public-key
+                preferred-name
+                mnemonic
+                keycard-pairing
+                address
+                notifications-enabled?]
+         :as   multiaccount} @(re-frame/subscribe [:multiaccount])
+        active-contacts-count @(re-frame/subscribe [:contacts/active-count])
+        tribute-to-talk @(re-frame/subscribe [:tribute-to-talk/profile])
+        registrar @(re-frame/subscribe [:ens.stateofus/registrar])
+        photo-added? @(re-frame/subscribe [:profile/photo-added?])]
+    [large-toolbar/flat-list-with-header-handler
+     (header multiaccount photo-added?)
+     (flat-list-content
+      preferred-name registrar tribute-to-talk
+      active-contacts-count mnemonic
+      keycard-pairing notifications-enabled?)
+     list-ref
+     scroll-y]))
 
-(defview my-profile []
-  (letsubs [{:keys [public-key photo-path] :as current-account} [:account/account]
-            editing?        [:get :my-profile/editing?]
-            extensions      [:get :extensions/profile]
-            changed-account [:get :my-profile/profile]
-            currency        [:wallet/currency]
-            login-data      [:get :accounts/login]
-            scroll          (reagent/atom nil)
-            active-contacts-count [:contacts/active-count]
-            {tribute-to-talk-seen? :seen?
-             snt-amount :snt-amount} [:tribute-to-talk/settings]]
-    (let [shown-account    (merge current-account changed-account)
-          ;; We scroll on the component once rendered. setTimeout is necessary,
-          ;; likely to allow the animation to finish.
-          on-show-edit     (fn []
-                             (js/setTimeout
-                              #(.scrollTo @scroll {:x 0 :y 0 :animated false})
-                              300))
-          on-show-advanced (fn []
-                             (js/setTimeout
-                              #(.scrollToEnd @scroll {:animated false})
-                              300))]
-      [react/keyboard-avoiding-view {:style {:flex 1}}
-       [status-bar/status-bar {:type :main}]
-       [react/view profile.components.styles/profile
-        (if editing?
-          [my-profile-edit-toolbar on-show-edit]
-          [my-profile-toolbar])
-        [react/scroll-view {:ref                          #(reset! scroll %)
-                            :keyboard-should-persist-taps :handled}
-         [react/view profile.components.styles/profile-form
-          [profile.components/profile-header
-           {:contact              current-account
-            :edited-contact       changed-account
-            :editing?             editing?
-            :allow-icon-change?   true
-            :options              (if (not= (identicon/identicon public-key)
-                                            photo-path)
-                                    (profile-icon-options-ext)
-                                    profile-icon-options)
-            :on-change-text-event :my-profile/update-name}]]
-         [share-profile-item (dissoc current-account :mnemonic)]
-         [contacts-list-item active-contacts-count]
-         (when config/tr-to-talk-enabled?
-           [tribute-to-talk-item snt-amount tribute-to-talk-seen?])
-         [my-profile-settings current-account shown-account currency (nil? login-data) extensions]
-         (when (nil? login-data)
-           [advanced shown-account on-show-advanced])]]])))
+(defn my-profile []
+  (let [list-ref (reagent/atom nil)
+        anim-opacity (animation/create-value 0)
+        scroll-y (animation/create-value 0)]
+    (large-toolbar/add-listener anim-opacity scroll-y)
+    (fn []
+      [react/view
+       {:style
+        (merge {:flex 1}
+               (when platform/ios?
+                 {:margin-bottom tabs.styles/tabs-diff}))}
+       [minimized-toolbar-handler anim-opacity]
+       [content-with-header list-ref scroll-y]])))

@@ -3,9 +3,8 @@
             [re-frame.core :as re-frame]
             [status-im.ui.components.react :as react]
             [status-im.ui.screens.profile.navigation]
-            [status-im.accounts.update.core :as accounts.update]
+            [status-im.multiaccounts.update.core :as multiaccounts.update]
             [status-im.chat.models :as chat-models]
-            [status-im.chat.commands.input :as commands-input]
             [status-im.utils.image-processing :as image-processing]
             [taoensso.timbre :as log]
             [status-im.utils.fx :as fx]))
@@ -23,10 +22,8 @@
    "photo"))
 
 (defn send-transaction [chat-id {:keys [db] :as cofx}]
-  (let [send-command (get-in db [:id->command ["send" #{:personal-chats}]])]
-    (fx/merge cofx
-              (chat-models/start-chat chat-id {:navigation-reset? true})
-              (commands-input/select-chat-input-command send-command nil))))
+  ;;TODO start send transaction command flow
+  (chat-models/start-chat chat-id {:navigation-reset? true}))
 
 (defn- valid-name? [name]
   (spec/valid? :profile/name name))
@@ -36,40 +33,42 @@
            (assoc-in [:my-profile/profile :valid-name?] (valid-name? name))
            (assoc-in [:my-profile/profile :name] name))})
 
-(defn update-picture [this-event base64-image {:keys [db]}]
-  (if base64-image
-    {:db       (-> db
-                   (assoc-in [:my-profile/profile :photo-path]
-                             (str "data:image/jpeg;base64," base64-image))
-                   (assoc :my-profile/editing? true))}
-    {:open-image-picker this-event}))
-
 (defn- clean-name [db edit-view]
   (let [name (get-in db [edit-view :name])]
     (if (valid-name? name)
       name
-      (get-in db [:account/account :name]))))
+      (get-in db [:multiaccount :name]))))
 
 (fx/defn clear-profile
   [{:keys [db]}]
   {:db (dissoc db :my-profile/profile :my-profile/default-name :my-profile/editing?)})
 
 (defn start-editing [{:keys [db]}]
-  (let [profile (select-keys (:account/account db) [:name :photo-path])]
+  (let [profile (select-keys (:multiaccount db) [:name :photo-path])]
     {:db (assoc db
                 :my-profile/editing? true
                 :my-profile/profile profile)}))
 
-(defn save [{:keys [db now] :as cofx}]
+(fx/defn save [{:keys [db now] :as cofx}]
   (let [{:keys [photo-path]} (:my-profile/profile db)
-        cleaned-name (clean-name db :my-profile/profile)
-        cleaned-edit (merge {:name         cleaned-name
-                             :last-updated now}
-                            (if photo-path
-                              {:photo-path photo-path}))]
+        cleaned-name (clean-name db :my-profile/profile)]
     (fx/merge cofx
               (clear-profile)
-              (accounts.update/account-update cleaned-edit {}))))
+              (multiaccounts.update/multiaccount-update :name cleaned-name {})
+              (multiaccounts.update/multiaccount-update :last-updated now {})
+              (when photo-path
+                (multiaccounts.update/multiaccount-update :photo-path photo-path {})))))
+
+(defn update-picture [this-event base64-image {:keys [db] :as cofx}]
+  (if base64-image
+    (fx/merge cofx
+              {:db (-> db
+                       (assoc-in [:my-profile/profile :photo-path]
+                                 (str "data:image/jpeg;base64," base64-image))
+                       (assoc :my-profile/editing? true)
+                       (assoc :profile/photo-added? true))}
+              save)
+    {:open-image-picker this-event}))
 
 (defn start-editing-group-chat-profile [{:keys [db]}]
   (let [current-chat-name (get-in db [:chats (:current-chat-id db) :name])]
@@ -78,7 +77,7 @@
              (assoc-in [:group-chat-profile/profile :name] current-chat-name))}))
 
 (defn enter-two-random-words [{:keys [db]}]
-  (let [{:keys [mnemonic]} (:account/account db)
+  (let [{:keys [mnemonic]} (:multiaccount db)
         shuffled-mnemonic (shuffle (map-indexed vector (clojure.string/split mnemonic #" ")))]
     {:db (assoc db :my-profile/seed {:step        :first-word
                                      :first-word  (first shuffled-mnemonic)
@@ -90,7 +89,7 @@
 (defn finish [{:keys [db] :as cofx}]
   (fx/merge cofx
             {:db (update db :my-profile/seed assoc :step :finish :error nil :word nil)}
-            (accounts.update/clean-seed-phrase)))
+            (multiaccounts.update/clean-seed-phrase)))
 
 (defn copy-to-clipboard! [value]
   (react/copy-to-clipboard value))

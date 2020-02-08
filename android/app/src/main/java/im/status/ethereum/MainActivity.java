@@ -2,7 +2,7 @@ package im.status.ethereum;
 
 import android.content.Context;
 import android.annotation.TargetApi;
-import android.support.annotation.Nullable;
+import androidx.annotation.Nullable;
 import android.app.AlertDialog;
 import android.app.ActivityManager;
 import android.content.DialogInterface;
@@ -12,14 +12,20 @@ import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Looper;
-import android.support.v4.app.ActivityCompat;
+import android.preference.PreferenceManager;
+import androidx.core.app.ActivityCompat;
 import android.util.Log;
+import android.view.WindowManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.provider.Settings;
 import android.os.Bundle;
+import com.facebook.react.ReactActivityDelegate;
+import com.facebook.react.ReactRootView;
+import com.swmansion.gesturehandler.react.RNGestureHandlerEnabledRootView;
 
+import com.facebook.react.ReactFragmentActivity;
 import com.facebook.react.ReactActivity;
 import com.facebook.react.modules.core.PermissionListener;
 import org.devio.rn.splashscreen.SplashScreen;
@@ -27,7 +33,7 @@ import org.devio.rn.splashscreen.SplashScreen;
 import java.util.Properties;
 import im.status.ethereum.module.StatusThreadPoolExecutor;
 
-public class MainActivity extends ReactActivity
+public class MainActivity extends ReactFragmentActivity
         implements ActivityCompat.OnRequestPermissionsResultCallback{
 
 
@@ -109,7 +115,7 @@ public class MainActivity extends ReactActivity
         final ActivityManager activityManager = getActivityManager();
         Log.v("RNBootstrap", "Available system memory "+getAvailableMemory(activityManager).availMem + ", maximum usable application memory " + activityManager.getLargeMemoryClass()+"M");
 
-
+        setSecureFlag();
         SplashScreen.show(this, true);
         super.onCreate(savedInstanceState);
 
@@ -202,6 +208,16 @@ public class MainActivity extends ReactActivity
         editor.commit();
     }
 
+    private void setSecureFlag() {
+        final SharedPreferences sharedPrefs = PreferenceManager.getDefaultSharedPreferences(this);
+        final boolean setSecure = sharedPrefs.getBoolean("BLANK_PREVIEW", false);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH && setSecure) {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        } else {
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE);
+        }
+    }
+
     @TargetApi(Build.VERSION_CODES.M)
     public void requestPermissions(String[] permissions, int requestCode, PermissionListener listener) {
         mPermissionListener = listener;
@@ -217,5 +233,15 @@ public class MainActivity extends ReactActivity
             // Permission has been granted. Start camera preview Activity.
             com.github.alinz.reactnativewebviewbridge.WebViewBridgeManager.grantAccess(requestCode);
         }
+    }
+
+    @Override
+    protected ReactActivityDelegate createReactActivityDelegate() {
+        return new ReactActivityDelegate(this, getMainComponentName()) {
+            @Override
+            protected ReactRootView createRootView() {
+                return new RNGestureHandlerEnabledRootView(MainActivity.this);
+            }
+        };
     }
 }

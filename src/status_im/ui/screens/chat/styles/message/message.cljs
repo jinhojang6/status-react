@@ -1,36 +1,29 @@
 (ns status-im.ui.screens.chat.styles.message.message
-  (:require-macros [status-im.utils.styles :refer [defstyle defnstyle]])
-  (:require [status-im.ui.components.colors :as colors]
+  (:require [status-im.constants :as constants]
+            [status-im.ui.components.colors :as colors]
+            [status-im.ui.components.react :as react]
             [status-im.ui.screens.chat.styles.photos :as photos]
             [status-im.utils.platform :as platform]
-            [status-im.constants :as constants]))
+            [status-im.ui.components.typography :as typography]
+            [status-im.utils.styles :as styles]))
 
 (defn style-message-text
   [outgoing]
   {:color (if outgoing colors/white colors/text)})
 
-(defn message-padding-top
-  [{:keys [first-in-group? display-username?]}]
-  (if (and display-username?
-           first-in-group?)
-    6
-    2))
-
 (defn last-message-padding
-  [{:keys [last? typing]}]
-  (when (and last? (not typing))
+  [{:keys [first? typing]}]
+  (when (and first? (not typing))
     {:padding-bottom 16}))
 
 (defn message-body
-  [{:keys [outgoing display-photo?] :as message}]
-  (let [align (if outgoing :flex-end :flex-start)
+  [{:keys [outgoing] :as message}]
+  (let [align     (if outgoing :flex-end :flex-start)
         direction (if outgoing :row-reverse :row)]
-    (merge {:flex-direction direction
-            :padding-top    (message-padding-top message)
-            :align-self     align
-            :align-items    align}
-           (when display-photo?
-             {:padding-left  8}))))
+    {:flex-direction direction
+     :margin-top     4
+     :align-self     align
+     :align-items    align}))
 
 (def message-timestamp
   {:font-size  10
@@ -46,11 +39,12 @@
 (defn message-timestamp-text
   [justify-timestamp? outgoing rtl? emoji?]
   (merge message-timestamp
-         {:color (if (and outgoing (not emoji?))
-                   (colors/alpha colors/white 0.7)
-                   colors/gray)}
+         {:line-height 10
+          :color       (if outgoing
+                         colors/white-transparent-70
+                         colors/gray)}
          (when justify-timestamp? {:position              :absolute
-                                   :bottom                7
+                                   :bottom                9 ; 6 Bubble bottom, 3 message baseline
                                    (if rtl? :left :right) 12})))
 
 (def message-expand-button
@@ -66,25 +60,25 @@
    :color       colors/text-gray})
 
 (defn group-message-wrapper [{:keys [outgoing] :as message}]
-  (merge {:flex-direction :column}
+  (merge {:flex-direction   :column}
          (if outgoing
-           {:margin-left 64}
-           {:margin-right 64})
+           {:margin-left 96}
+           {:margin-right 52})
          (last-message-padding message)))
 
-(defn timestamp-content-wrapper [outgoing message-type]
+(defn timestamp-content-wrapper [outgoing]
   {:flex-direction (if outgoing :row-reverse :row)})
 
 (defn group-message-view
-  [outgoing message-type]
+  [outgoing display-photo?]
   (let [align (if outgoing :flex-end :flex-start)]
-    (merge {:flex 1
-            :flex-direction :column
-            :max-width      320
+    (merge {:flex-direction :column
+            :flex-shrink    1
             :align-items    align}
            (if outgoing
              {:margin-right 8}
-             {:margin-left 8}))))
+             (when-not display-photo?
+               {:margin-left 8})))))
 
 (defn delivery-status [outgoing]
   (if outgoing
@@ -93,9 +87,18 @@
     {:align-self    :flex-start
      :padding-left  (if platform/desktop? 24 8)}))
 
-(def message-author
-  {:width      photos/default-size
-   :align-self :flex-end})
+(def message-author-touchable
+  {:margin-left      12
+   :padding-vertical 2})
+
+(defn message-author [outgoing]
+  (merge
+   {:width      (+ 16 photos/default-size) ;; 16 is for the padding
+    :align-self :flex-end}
+   (if outgoing
+     {:padding-left 8}
+     {:padding-horizontal 8
+      :padding-right 8})))
 
 (def delivery-view
   {:flex-direction :row
@@ -129,27 +132,35 @@
          :line-height 22
          :margin-bottom (if collapsed? 2 0)))
 
-(defnstyle emoji-message
+(defn emoji-message
   [{:keys [incoming-group]}]
-  {:font-size 40
-   :margin-top (if incoming-group 4 0)})
+  {:font-size    28
+   :line-height  34                     ;TODO: Smaller crops the icon on the top
+   :margin-right 12
+   :margin-top   (if incoming-group 4 0)})
 
 (defn message-view
-  [{:keys [content-type outgoing group-chat first-in-group?]}]
-  (merge {:padding-vertical   6
-          :padding-horizontal 12
-          :border-radius      8
-          :margin-top         (if (and first-in-group?
-                                       (or outgoing
-                                           (not group-chat)))
-                                16
-                                4)}
-         (if (= content-type constants/content-type-emoji)
-           {:flex-direction :row}
-           {:background-color (if outgoing colors/blue colors/blue-light)})
-         (when (= content-type constants/content-type-command)
-           {:padding-top    12
-            :padding-bottom 10})))
+  [{:keys [content-type outgoing group-chat last-in-group?]}]
+  (merge
+   {:border-top-left-radius     16
+    :border-top-right-radius    16
+    :border-bottom-right-radius 16
+    :border-bottom-left-radius  16
+    :padding-vertical           6
+    :padding-horizontal         12
+    :border-radius              8
+    :margin-top                 (if (and last-in-group?
+                                         (or outgoing
+                                             (not group-chat)))
+                                  16
+                                  0)}
+   (if outgoing
+     {:border-bottom-right-radius 4}
+     {:border-bottom-left-radius 4})
+
+   {:background-color (if outgoing colors/blue colors/blue-light)}
+   (when (= content-type constants/content-type-emoji)
+     {:flex-direction :row})))
 
 (def play-image
   {:width  33
@@ -172,17 +183,21 @@
    :font-weight         (if chosen? "500" "400")
    :padding-top         6
    :padding-left        12
+   :text-align-vertical :center})
+
+(def message-author-name-container
+  {:padding-top         6
+   :padding-left        12
    :padding-right       16
    :margin-right        12
-   :text-align-vertical :center
-   :color               colors/gray})
+   :text-align-vertical :center})
 
 (defn quoted-message-container [outgoing]
   {:margin-bottom              6
    :padding-bottom             6
    :border-bottom-color        (if outgoing
-                                 colors/white-light-transparent
-                                 (colors/alpha colors/black 0.1))
+                                 colors/white-transparent-10
+                                 colors/black-transparent)
    :border-bottom-width        2
    :border-bottom-left-radius  2
    :border-bottom-right-radius 2})
@@ -194,28 +209,112 @@
 
 (defn quoted-message-author [outgoing chosen?]
   (assoc (message-author-name chosen?)
-         :padding-bottom  5
-         :padding-top     4
-         :padding-left    6
+         :padding-bottom  6
+         :padding-top     0
+         :padding-left    0
+         :line-height     18
+         :font-weight    "500"
          :color           (if outgoing
-                            (colors/alpha colors/white 0.7)
+                            colors/white-transparent-70
                             colors/gray)))
 
 (defn quoted-message-text [outgoing]
   {:font-size 14
    :color (if outgoing
-            (colors/alpha colors/white 0.7)
+            colors/white-transparent-70
             colors/gray)})
 
-(def extension-container
-  {:align-items :center
-   :margin      10})
+;; Markdown styles
 
-(defn extension-text [outgoing]
-  {:font-size  12
-   :margin-top 10
-   :color      (if outgoing colors/white-transparent colors/gray)})
+(def default-text-style
+  {:max-font-size-multiplier react/max-font-size-multiplier
+   :style (assoc typography/default-style
+                 :line-height 22)})
 
-(defn extension-install [outgoing]
-  {:font-size 12
-   :color     (if outgoing colors/white colors/blue)})
+(def outgoing-text-style
+  (update default-text-style :style
+          assoc :color colors/white))
+
+(defn text-style [outgoing]
+  (if outgoing
+    outgoing-text-style
+    default-text-style))
+
+(def emph-text-style
+  (update default-text-style :style
+          assoc :font-style :italic))
+
+(def outgoing-emph-text-style
+  (update emph-text-style :style
+          assoc :color colors/white))
+
+(defn emph-style [outgoing]
+  (if outgoing
+    outgoing-emph-text-style
+    emph-text-style))
+
+(def strong-text-style
+  (update default-text-style :style
+          assoc :font-weight "700"))
+
+(def outgoing-strong-text-style
+  (update strong-text-style :style
+          assoc :color colors/white))
+
+(defn strong-style [outgoing]
+  (if outgoing
+    outgoing-strong-text-style
+    strong-text-style))
+
+(def monospace-fonts (if platform/ios? "Courier" "monospace"))
+
+(def code-block-background "#2E386B")
+
+(def inline-code-style
+  (update default-text-style :style
+          assoc
+          :font-family monospace-fonts
+          :color colors/white
+          :background-color code-block-background))
+
+(def codeblock-style {:style {:padding 10
+                              :background-color code-block-background
+                              :border-radius 4}})
+
+(def codeblock-text-style
+  (update default-text-style :style
+          assoc
+          :font-family monospace-fonts
+          :color colors/white))
+
+(def default-blockquote-style
+  {:style {:border-left-width 2
+           :padding-left 3
+           :border-left-color colors/gray-transparent-40}})
+
+(def outgoing-blockquote-style
+  (update default-blockquote-style :style
+          assoc
+          :border-left-color colors/white-transparent))
+
+(defn blockquote-style [outgoing]
+  (if outgoing
+    outgoing-blockquote-style
+    default-blockquote-style))
+
+(def default-blockquote-text-style
+  (update default-text-style :style
+          assoc
+          :line-height 19
+          :font-size 14
+          :color colors/black-transparent-50))
+
+(def outgoing-blockquote-text-style
+  (update default-blockquote-text-style :style
+          assoc
+          :color colors/white-transparent-70))
+
+(defn blockquote-text-style [outgoing]
+  (if outgoing
+    outgoing-blockquote-text-style
+    default-blockquote-text-style))

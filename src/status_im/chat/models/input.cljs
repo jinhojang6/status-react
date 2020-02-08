@@ -2,11 +2,9 @@
   (:require [clojure.string :as string]
             [goog.object :as object]
             [re-frame.core :as re-frame]
-            [status-im.chat.commands.core :as commands]
-            [status-im.chat.commands.input :as commands.input]
-            [status-im.chat.commands.sending :as commands.sending]
             [status-im.chat.constants :as chat.constants]
             [status-im.chat.models :as chat]
+            [status-im.chat.models.message-content :as message-content]
             [status-im.chat.models.message :as chat.message]
             [status-im.constants :as constants]
             [status-im.js-dependencies :as dependencies]
@@ -29,8 +27,7 @@
   "Set input text for current-chat. Takes db and input text and cofx
   as arguments and returns new fx. Always clear all validation messages."
   [{{:keys [current-chat-id] :as db} :db} new-input]
-  {:db (-> (chat/set-chat-ui-props db {:validation-messages nil})
-           (assoc-in [:chats current-chat-id :input-text] (text->emoji new-input)))})
+  {:db (assoc-in db [:chats current-chat-id :input-text] (text->emoji new-input))})
 
 (defn- start-cooldown [{:keys [db]} cooldowns]
   {:dispatch-later        [{:dispatch [:chat/disable-cooldown]
@@ -70,29 +67,13 @@
   (when-let [cmp-ref (get-in chat-ui-props [current-chat-id ref])]
     {::focus-rn-component cmp-ref}))
 
-(fx/defn select-chat-input-command
-  "Sets chat command and focuses on input"
-  [{:keys [db] :as cofx} command params previous-command-message]
-  (fx/merge cofx
-            (commands.input/set-command-reference previous-command-message)
-            (commands.input/select-chat-input-command command params)
-            (chat-input-focus :input-ref)))
-
-(fx/defn set-command-prefix
-  "Sets command prefix character and focuses on input"
-  [{:keys [db] :as cofx}]
-  (fx/merge cofx
-            (set-chat-input-text chat.constants/command-char)
-            (chat-input-focus :input-ref)))
-
 (fx/defn reply-to-message
   "Sets reference to previous chat message and focuses on input"
-  [{:keys [db] :as cofx} message-id old-message-id]
+  [{:keys [db] :as cofx} message-id]
   (let [current-chat-id (:current-chat-id db)]
     (fx/merge cofx
               {:db (assoc-in db [:chats current-chat-id :metadata :responding-to-message]
-                             {:message-id     message-id
-                              :old-message-id old-message-id})}
+                             {:message-id     message-id})}
               (chat-input-focus :input-ref))))
 
 (fx/defn cancel-message-reply
@@ -103,74 +84,48 @@
               {:db (assoc-in db [:chats current-chat-id :metadata :responding-to-message] nil)}
               (chat-input-focus :input-ref))))
 
-(defn command-complete-fx
-  "command is complete, proceed with command processing"
-  [cofx input-text command custom-params]
-  (fx/merge cofx
-            (commands.sending/validate-and-send input-text command custom-params)
-            (set-chat-input-text nil)
-            (process-cooldown)))
-
-(defn command-not-complete-fx
-  "command is not complete, just add space after command if necessary"
-  [input-text current-chat-id {:keys [db]}]
-  {:db (cond-> db
-         (not (commands.input/command-ends-with-space? input-text))
-         (assoc-in [:chats current-chat-id :input-text]
-                   (str input-text chat.constants/spacing-char)))})
-
 (defn plain-text-message-fx
-  "no command detected, when not empty, proceed by sending text message without command processing"
+  "when not empty, proceed by sending text message"
   [input-text current-chat-id {:keys [db] :as cofx}]
   (when-not (string/blank? input-text)
-    (let [{:keys [message-id old-message-id]}
-          (get-in db [:chats current-chat-id :metadata :responding-to-message])]
+    (let [{:keys [message-id]}
+          (get-in db [:chats current-chat-id :metadata :responding-to-message])
+          preferred-name (get-in db [:multiaccount :preferred-name])
+          emoji? (message-content/emoji-only-content? {:text input-text
+                                                       :response-to message-id})]
       (fx/merge cofx
                 {:db (assoc-in db [:chats current-chat-id :metadata :responding-to-message] nil)}
                 (chat.message/send-message {:chat-id      current-chat-id
-                                            :content-type constants/content-type-text
-                                            :content      (cond-> {:chat-id current-chat-id
-                                                                   :text    input-text}
-                                                            message-id
-                                                            (assoc :response-to old-message-id
-                                                                   :response-to-v2 message-id))})
-                (commands.input/set-command-reference nil)
+                                            :content-type (if emoji?
+                                                            constants/content-type-emoji
+                                                            constants/content-type-text)
+                                            :text input-text
+                                            :response-to message-id
+                                            :ens-name preferred-name})
                 (set-chat-input-text nil)
                 (process-cooldown)))))
 
-(defn send-plain-text-message-fx
-  "no command detected, when not empty, proceed by sending text message without command processing"
-  [{:keys [db] :as cofx} message-text current-chat-id]
-  (when-not (string/blank? message-text)
-    (chat.message/send-message cofx {:chat-id      current-chat-id
-                                     :content-type constants/content-type-text
-                                     :content      (cond-> {:chat-id current-chat-id
-                                                            :text    message-text})})))
-
 (fx/defn send-sticker-fx
-  [{:keys [db] :as cofx} {:keys [uri pack]} current-chat-id]
-  (when-not (string/blank? uri)
+  [{:keys [db] :as cofx} {:keys [hash pack]} current-chat-id]
+  (when-not (string/blank? hash)
     (chat.message/send-message cofx {:chat-id      current-chat-id
                                      :content-type constants/content-type-sticker
-                                     :content      (cond-> {:chat-id current-chat-id
-                                                            :uri     uri
-                                                            :pack    pack
-                                                            :text    "Update to latest version to see a nice sticker here!"})})))
+                                     :sticker {:hash hash
+                                               :pack pack}
+                                     :text    "Update to latest version to see a nice sticker here!"})))
 
 (fx/defn send-current-message
   "Sends message from current chat input"
-  [{{:keys [current-chat-id id->command access-scope->command-id] :as db} :db :as cofx}]
-  (let [{:keys [input-text custom-params]} (get-in db [:chats current-chat-id])
-        command      (commands.input/selected-chat-command
-                      input-text nil (commands/chat-commands id->command
-                                                             access-scope->command-id
-                                                             (get-in db [:chats current-chat-id])))]
-    (if command
-      ;; Returns true if current input contains command
-      (if (= :complete (:command-completion command))
-        (command-complete-fx cofx input-text command custom-params)
-        (command-not-complete-fx input-text current-chat-id cofx))
-      (plain-text-message-fx input-text current-chat-id cofx))))
+  [{{:keys [current-chat-id] :as db} :db :as cofx}]
+  (let [{:keys [input-text]} (get-in db [:chats current-chat-id])]
+    (plain-text-message-fx input-text current-chat-id cofx)))
+
+(fx/defn send-transaction-result
+  {:events [:chat/send-transaction-result]}
+  [cofx chat-id params result]
+  ;;TODO: should be implemented on status-go side
+  ;;see https://github.com/status-im/team-core/blob/6c3d67d8e8bd8500abe52dab06a59e976ec942d2/rfc-001.md#status-gostatus-react-interface
+)
 
 ;; effects
 

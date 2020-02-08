@@ -1,12 +1,16 @@
 (ns status-im.utils.identicon
-  (:require [status-im.js-dependencies :as dependencies]))
+  (:require
+   [re-frame.core :as re-frame]
+   [status-im.native-module.core :as native-module]))
 
-(def default-size 40)
+(def identicon (memoize native-module/identicon))
 
-(defn identicon
-  ([hash] (identicon hash (clj->js {:background [255 255 255 255]
-                                    :margin     0.24
-                                    :size       default-size})))
-  ([hash options]
-   (str "data:image/png;base64,"
-        (str (new dependencies/identicon-js hash options)))))
+(def identicon-async native-module/identicon-async)
+
+(re-frame/reg-fx
+ :insert-identicons
+ (fn [key-path-seq]
+   (for [key-path key-path-seq]
+     (let [public-key (first key-path)
+           path-for-identicon (second key-path)]
+       (identicon-async public-key #(re-frame/dispatch [:identicon-generated path-for-identicon %]))))))

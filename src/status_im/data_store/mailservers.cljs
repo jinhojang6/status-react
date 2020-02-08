@@ -1,66 +1,43 @@
 (ns status-im.data-store.mailservers
-  (:require [cljs.tools.reader.edn :as edn]
-            [re-frame.core :as re-frame]
-            [status-im.data-store.realm.core :as core]))
+  (:require [re-frame.core :as re-frame]
+            [status-im.ethereum.json-rpc :as json-rpc]
+            [status-im.utils.fx :as fx]
+            [taoensso.timbre :as log]))
 
-(re-frame/reg-cofx
- :data-store/get-all-mailservers
- (fn [cofx _]
-   (assoc cofx :data-store/mailservers (mapv #(-> %
-                                                  (update :id keyword)
-                                                  (update :fleet keyword))
-                                             (-> @core/account-realm
-                                                 (core/get-all :mailserver)
-                                                 (core/all-clj :mailserver))))))
+(defn mailserver-request-gaps->rpc
+  [{:keys [chat-id] :as gap}]
+  (-> gap
+      (assoc :chatId chat-id)
+      (dissoc :chat-id)))
 
-(defn save-tx
-  "Returns tx function for saving a mailserver"
-  [{:keys [id] :as mailserver}]
-  (fn [realm]
-    (core/create realm
-                 :mailserver
-                 mailserver
-                 true)))
+(fx/defn load-gaps
+  [cofx chat-id success-fn]
+  {::json-rpc/call [{:method "mailservers_getMailserverRequestGaps"
+                     :params [chat-id]
+                     :on-success #(let [indexed-gaps (reduce (fn [acc {:keys [id] :as g}]
+                                                               (assoc acc id g))
+                                                             {}
+                                                             %)]
+                                    (success-fn chat-id indexed-gaps))
+                     :on-failure #(log/error "failed to fetch gaps" %)}]})
 
-(defn delete-tx
-  "Returns tx function for deleting a mailserver"
-  [id]
-  (fn [realm]
-    (core/delete realm
-                 (core/get-by-field realm :mailserver :id id))))
+(fx/defn save-gaps
+  [cofx gaps]
+  {::json-rpc/call [{:method "mailservers_addMailserverRequestGaps"
+                     :params [(map mailserver-request-gaps->rpc gaps)]
+                     :on-success #(log/info "saved gaps successfully")
+                     :on-failure #(log/error "failed to save gap" %)}]})
 
-(defn deserialize-mailserver-topic [serialized-mailserver-topic]
-  (-> serialized-mailserver-topic
-      (dissoc :topic)
-      (update :chat-ids edn/read-string)))
+(fx/defn delete-gaps
+  [cofx ids]
+  {::json-rpc/call [{:method "mailservers_deleteMailserverRequestGaps"
+                     :params [ids]
+                     :on-success #(log/info "deleted gaps successfully")
+                     :on-failure #(log/error "failed to delete gap" %)}]})
 
-(re-frame/reg-cofx
- :data-store/mailserver-topics
- (fn [cofx _]
-   (assoc cofx
-          :data-store/mailserver-topics
-          (reduce (fn [acc {:keys [topic] :as mailserver-topic}]
-                    (assoc acc topic (deserialize-mailserver-topic mailserver-topic)))
-                  {}
-                  (-> @core/account-realm
-                      (core/get-all :mailserver-topic)
-                      (core/all-clj :mailserver-topic))))))
-
-(defn save-mailserver-topic-tx
-  "Returns tx function for saving mailserver topic"
-  [{:keys [topic mailserver-topic]}]
-  (fn [realm]
-    (core/create realm
-                 :mailserver-topic
-                 (-> mailserver-topic
-                     (assoc :topic topic)
-                     (update :chat-ids pr-str))
-                 true)))
-
-(defn delete-mailserver-topic-tx
-  "Returns tx function for deleting mailserver topic"
-  [topic]
-  (fn [realm]
-    (let [mailserver-topic (core/single
-                            (core/get-by-field realm :mailserver-topic :topic topic))]
-      (core/delete realm mailserver-topic))))
+(fx/defn delete-gaps-by-chat-id
+  [cofx chat-id]
+  {::json-rpc/call [{:method "mailservers_deleteMailserverRequestGapsByChatID"
+                     :params [chat-id]
+                     :on-success #(log/info "deleted gaps successfully")
+                     :on-failure #(log/error "failed to delete gap" %)}]})

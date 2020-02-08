@@ -1,16 +1,20 @@
 (ns status-im.ui.components.tooltip.styles
-  (:require-macros [status-im.utils.styles :refer [defstyle defnstyle]])
-  (:require [status-im.ui.components.styles :as styles]
-            [status-im.ui.components.colors :as colors]))
+  (:require [status-im.ui.components.colors :as colors]
+            [status-im.utils.styles :as styles]
+            [status-im.utils.config :as config]))
 
 (def tooltip-container
-  {:position    :absolute
-   :align-items :center
-   :left        0
-   :right       0
-   :top         0})
+  (merge
+   {:position       :absolute
+    :align-items    :center
+    :left           0
+    :right          0
+    :top            0}
+   ;;we need this for e2e tests
+   (when-not config/tooltip-events?
+     {:pointer-events :none})))
 
-(defstyle bottom-tooltip-container
+(styles/def bottom-tooltip-container
   {:position    :absolute
    :align-items :center
    :left        12
@@ -23,14 +27,20 @@
    :align-items :center
    :left        0
    :right       0
-   :bottom      bottom-value
+   :bottom      0
+   :transform   [{:translateY bottom-value}]
    :opacity     opacity-value})
 
 (defn tooltip-text-container [color]
   {:padding-horizontal 16
-   :padding-vertical   9
+   :padding-vertical   6
+   :elevation          3
    :background-color   color
-   :border-radius      8})
+   :border-radius      8
+   :shadow-radius      12
+   :shadow-offset      {:width 0 :height 4}
+   :shadow-opacity     0.16
+   :shadow-color       "rgba(0, 34, 51)"})
 
 (def bottom-tooltip-text-container
   {:flex-direction     :row
@@ -42,8 +52,9 @@
    :border-radius      8})
 
 (defn tooltip-text [font-size]
-  {:color     colors/red
-   :font-size font-size})
+  {:color        colors/red
+   :line-height  15
+   :font-size    font-size})
 
 (def bottom-tooltip-text
   {:color colors/white})

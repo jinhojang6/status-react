@@ -8,19 +8,7 @@
             [status-im.utils.clocks :as utils.clocks]
             [status-im.constants :as constants]))
 
-;; required
-(spec/def ::ack (spec/coll-of string? :kind vector?))
-(spec/def ::seen (spec/coll-of string? :kind vector?))
-(spec/def ::pending-ack (spec/coll-of string? :kind vector?))
-(spec/def ::pending-send (spec/coll-of string? :kind vector?))
-(spec/def ::resend? (spec/nilable #{"contact-request" "contact-request-confirmation" "contact-update"}))
-
 ;; optional
-(spec/def ::topic (spec/nilable string?))
-(spec/def ::topics (spec/coll-of ::topic :min-count 1))
-(spec/def ::sym-key-id (spec/nilable string?))
-;;TODO (yenda) remove once go implements persistence
-(spec/def ::sym-key (spec/nilable string?))
 (spec/def :transport/filter-id (spec/or :keyword keyword?
                                         :chat-id :global/not-empty-string))
 (spec/def :transport/filter any?)
@@ -32,27 +20,19 @@
                                        :opt-un [:contact/system-tags
                                                 :contact/last-updated
                                                 :contact/last-online
-                                                :contact/fcm-token
                                                 :pairing/pending?
                                                 :contact/tags]))
 (spec/def :pairing/contacts (spec/nilable (spec/map-of :global/not-empty-string :pairing/contact)))
 (spec/def :pairing/installation-id :global/not-empty-string)
 (spec/def :pairing/device-type :global/not-empty-string)
 
-(spec/def :transport/chat (spec/keys :req-un [::ack ::seen ::pending-ack ::pending-send ::topic]
-                                     :opt-un [::sym-key-id ::sym-key ::resend?]))
-(spec/def :transport/chats (spec/map-of :global/not-empty-string :transport/chat))
 (spec/def :transport/filters (spec/map-of :transport/filter-id (spec/coll-of :transport/filter)))
 
 (defn create-chat
   "Initialize datastructure for chat representation at the transport level
   Currently only :topic is actually used"
   [{:keys [topic resend? one-to-one now]}]
-  {:ack          []
-   :seen         []
-   :pending-ack  []
-   :pending-send []
-   :one-to-one   (boolean one-to-one)
+  {:one-to-one   (boolean one-to-one)
    :resend?      resend?
    :topic        topic})
 
@@ -73,15 +53,14 @@
 
 (spec/def :message.content/text (spec/and string? (complement s/blank?)))
 (spec/def :message.content/response-to string?)
-(spec/def :message.content/response-to-v2 string?)
-(spec/def :message.content/command-path (spec/tuple string? (spec/coll-of (spec/or :scope keyword? :chat-id string?) :kind set? :min-count 1)))
 (spec/def :message.content/uri (spec/and string? (complement s/blank?)))
 (spec/def :message.content/pack (spec/and string? (complement s/blank?)))
 (spec/def :message.content/params (spec/map-of keyword? any?))
 
-(spec/def ::content-type #{constants/content-type-text constants/content-type-command
-                           constants/content-type-command-request constants/content-type-sticker})
-(spec/def ::message-type #{:group-user-message :public-group-user-message :user-message})
+(spec/def ::content-type #{constants/content-type-text
+                           constants/content-type-emoji
+                           constants/content-type-sticker})
+(spec/def ::message-type #{constants/message-type-private-group constants/message-type-public-group constants/message-type-one-to-one})
 (spec/def ::clock-value (spec/and pos-int?
                                   utils.clocks/safe-timestamp?))
 (spec/def ::timestamp (spec/nilable pos-int?))
@@ -96,9 +75,9 @@
                              :message/message-seen :message/message-seen
                              :message/group-membership-update :message/group-membership-update))
 
-(spec/def :message/contact-request (spec/keys :req-un [:contact/name ::profile-image :contact/address :contact/fcm-token]))
-(spec/def :message/contact-update (spec/keys :req-un [:contact/name ::profile-image :contact/address :contact/fcm-token]))
-(spec/def :message/contact-request-confirmed (spec/keys :req-un [:contact/name ::profile-image :contact/address :contact/fcm-token]))
+(spec/def :message/contact-request (spec/keys :req-un [:contact/name ::profile-image :contact/address]))
+(spec/def :message/contact-update (spec/keys :req-un [:contact/name ::profile-image :contact/address]))
+(spec/def :message/contact-request-confirmed (spec/keys :req-un [:contact/name ::profile-image :contact/address]))
 (spec/def :message/new-contact-key (spec/keys :req-un [::sym-key ::topic ::message]))
 
 (spec/def :message/message-seen (spec/keys :req-un [:message/ids]))
@@ -111,19 +90,10 @@
 (spec/def :message/message-common (spec/keys :req-un [::content-type ::message-type ::clock-value ::timestamp]))
 (spec/def :message.text/content (spec/keys :req-un [:message.content/text]
                                            :req-opt [:message.content/response-to]))
-(spec/def :message.command/content (spec/keys :req-un [:message.content/command-path :message.content/params]))
 
-(spec/def :message.sticker/content (spec/keys :req-un [:message.content/uri]))
+(spec/def :message.sticker/content (spec/keys :req-un [:message.content/hash]))
 
 (defmulti content-type :content-type)
-
-(defmethod content-type constants/content-type-command [_]
-  (spec/merge :message/message-common
-              (spec/keys :req-un [:message.command/content])))
-
-(defmethod content-type constants/content-type-command-request [_]
-  (spec/merge :message/message-common
-              (spec/keys :req-un [:message.command/content])))
 
 (defmethod content-type constants/content-type-sticker [_]
   (spec/merge :message/message-common
@@ -134,15 +104,3 @@
               (spec/keys :req-un [:message.text/content])))
 
 (spec/def :message/message (spec/multi-spec content-type :content-type))
-
-(defn all-filters-added?
-  [{:keys [db]}]
-  (let [filters (set (keys (get db :transport/filters)))
-        chats   (into #{:discovery-topic}
-                      (keys (filter (fn [[chat-id {:keys [topic one-to-one]}]]
-                                      (if one-to-one
-                                        (and config/partitioned-topic-enabled?
-                                             chat-id)
-                                        topic))
-                                    (get db :transport/chats))))]
-    (empty? (sets/difference chats filters))))

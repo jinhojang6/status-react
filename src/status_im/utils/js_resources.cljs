@@ -1,29 +1,9 @@
 (ns status-im.utils.js-resources
-  (:require-macros [status-im.utils.slurp :refer [slurp slurp-bot]])
-  (:require [status-im.utils.types :refer [json->clj]]
-            [clojure.string :as s]))
-
-(def local-protocol "local://")
-
-(defn local-resource? [url]
-  (and (string? url) (s/starts-with? url local-protocol)))
+  (:require-macros [status-im.utils.slurp :refer [slurp]]))
 
 (def webview-js (slurp "resources/js/webview.js"))
-(def web3 (str "; if (typeof Web3 == 'undefined') {"
-               (slurp "node_modules/web3/dist/web3.min.js")
-               "}"))
-(defn web3-init [provider-address current-account-address network-id]
-  (str "var providerAddress = \"" provider-address "\";"
-       "var currentAccountAddress = \"" current-account-address "\";"
-       "var networkId = \"" network-id "\";"
-       (slurp "resources/js/web3_init.js")))
+(def provider-file (slurp "resources/js/provider.js"))
 
-(defn web3-opt-in-init [network-id]
+(defn ethereum-provider [network-id]
   (str "var networkId = \"" network-id "\";"
-       (slurp "resources/js/web3_opt_in.js")))
-
-(defn local-storage-data [data]
-  (str "var localStorageData = " (or data "{}") ";"))
-
-(defn network-id [id]
-  (str "status.ethereumNetworkId = " (or id "null") "; "))
+       (provider-file)))

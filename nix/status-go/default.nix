@@ -1,165 +1,187 @@
-{ stdenv, buildGoPackage, go, pkgs, fetchFromGitHub, openjdk, androidPkgs, composeXcodeWrapper, xcodewrapperArgs ? {} }:
-
-with stdenv;
+{ config, stdenv, callPackage, mkShell, mergeSh, buildGoPackage, go,
+  fetchFromGitHub, mkFilter, openjdk, androidPkgs, xcodeWrapper }:
 
 let
-  gomobile = pkgs.callPackage ./gomobile { inherit (androidPkgs) platform-tools; inherit composeXcodeWrapper xcodewrapperArgs; };
-  version = lib.fileContents ../../STATUS_GO_VERSION; # TODO: Simplify this path search with lib.locateDominatingFile
-  owner = lib.fileContents ../../STATUS_GO_OWNER;
-  repo = "status-go";
-  goPackagePath = "github.com/${owner}/${repo}";
-  rev = version;
-  sha256 = lib.fileContents ../../STATUS_GO_SHA256;
+  inherit (stdenv.lib)
+    catAttrs concatStrings concatStringsSep fileContents importJSON makeBinPath
+    optional optionalString strings attrValues mapAttrs attrByPath
+    traceValFn;
+
+  envFlags = callPackage ../tools/envParser.nix { };
+  enableNimbus = (attrByPath ["STATUS_GO_ENABLE_NIMBUS"] "0" envFlags) != "0";
+  utils = callPackage ./utils.nix { inherit xcodeWrapper; };
+  gomobile = callPackage ./gomobile { inherit (androidPkgs) platform-tools; inherit xcodeWrapper utils buildGoPackage; };
+  nimbus = if enableNimbus then callPackage ./nimbus { } else { wrappers-android = { }; };
+  buildStatusGoDesktopLib = callPackage ./build-desktop-status-go.nix { inherit buildGoPackage go xcodeWrapper utils; };
+  buildStatusGoMobileLib = callPackage ./build-mobile-status-go.nix { inherit buildGoPackage go gomobile xcodeWrapper utils androidPkgs; };
+  srcData =
+    # If config.status-im.status-go.src-override is defined, instruct Nix to use that path to build status-go
+    if (attrByPath ["status-im" "status-go" "src-override"] "" config) != "" then rec {
+        owner = "status-im";
+        repo = "status-go";
+        rev = "unknown";
+        shortRev = "unknown";
+        rawVersion = "develop";
+        cleanVersion = rawVersion;
+        goPackagePath = "github.com/${owner}/${repo}";
+        src =
+          let path = traceValFn (path: "Using local ${repo} sources from ${path}\n") config.status-im.status-go.src-override;
+          in builtins.path { # We use builtins.path so that we can name the resulting derivation, otherwise the name would be taken from the checkout directory, which is outside of our control
+            inherit path;
+            name = "${repo}-source-${shortRev}";
+            filter =
+              # Keep this filter as restrictive as possible in order to avoid unnecessary rebuilds and limit closure size
+              mkFilter {
+                dirRootsToInclude = [];
+                dirsToExclude = [ ".git" ".svn" "CVS" ".hg" ".vscode" ".dependabot" ".github" ".ethereumtest" "build" ];
+                filesToInclude = [ "Makefile" "go.mod" "go.sum" "VERSION" ];
+                root = path;
+              };
+          };
+    } else
+      # Otherwise grab it from the location defined by status-go-version.json
+      let
+        versionJSON = importJSON ../../status-go-version.json; # TODO: Simplify this path search with lib.locateDominatingFile
+        sha256 = versionJSON.src-sha256;
+      in rec {
+        inherit (versionJSON) owner repo version;
+        rev = versionJSON.commit-sha1;
+        shortRev = strings.substring 0 7 rev;
+        rawVersion = versionJSON.version;
+        cleanVersion = utils.sanitizeVersion versionJSON.version;
+        goPackagePath = "github.com/${owner}/${repo}";
+        src = fetchFromGitHub { inherit rev owner repo sha256; name = "${repo}-${srcData.shortRev}-source"; };
+      };
+
   mobileConfigs = {
-    android = {
+    android = rec {
       name = "android";
-      outputFileName = "status-go-${version}.aar";
-      envVars = ''
-        ANDROID_HOME=${androidPkgs.androidsdk}/libexec/android-sdk \
-        ANDROID_NDK_HOME="${androidPkgs.ndk-bundle}/libexec/android-sdk/ndk-bundle" \
-      '';
-      gomobileExtraFlags = "";
+      envVars = [
+        "ANDROID_HOME=${androidPkgs.androidsdk}/libexec/android-sdk"
+        "ANDROID_NDK_HOME=${androidPkgs.ndk-bundle}/libexec/android-sdk/ndk-bundle"
+        "PATH=${makeBinPath [ openjdk ]}:$PATH"
+      ];
+      gomobileExtraFlags = [ "-androidapi 23" ];
+      outputFileName = "status-go-${srcData.shortRev}.aar";
+      platforms = {
+        arm64 = {
+          linkNimbus = enableNimbus;
+          nimbus = assert enableNimbus; nimbus.wrappers-android.arm64;
+          gomobileTarget = "${name}/arm64";
+          outputFileName = "status-go-${srcData.shortRev}-arm64.aar";
+        };
+        arm = {
+          linkNimbus = enableNimbus;
+          nimbus = assert enableNimbus; nimbus.wrappers-android.arm;
+          gomobileTarget = "${name}/arm";
+          outputFileName = "status-go-${srcData.shortRev}-arm.aar";
+        };
+        x86 = {
+          linkNimbus = enableNimbus;
+          nimbus = assert enableNimbus; nimbus.wrappers-android.x86;
+          gomobileTarget = "${name}/386";
+          outputFileName = "status-go-${srcData.shortRev}-386.aar";
+        };
+      };
     };
-    ios = {
+    ios = rec {
       name = "ios";
+      envVars = [];
+      gomobileExtraFlags = [ "-iosversion=8.0" ];
       outputFileName = "Statusgo.framework";
-      envVars = "";
-      gomobileExtraFlags = "-iosversion=8.0";
+      platforms = {
+        ios = {
+          linkNimbus = enableNimbus;
+          nimbus = assert false; null; # TODO: Currently we don't support Nimbus on iOS
+          gomobileTarget = name;
+          inherit outputFileName;
+        };
+      };
     };
   };
   hostConfigs = {
     darwin = {
-      mobileTargets = [ mobileConfigs.android mobileConfigs.ios ];
-      desktopOutputFileName = "libstatus.a";
+      name = "macos";
+      allTargets = [ status-go-packages.desktop status-go-packages.ios status-go-packages.android ];
     };
     linux = {
-      mobileTargets = [ mobileConfigs.android ];
-      desktopOutputFileName = "libstatus.a";
+      name = "linux";
+      allTargets = [ status-go-packages.desktop status-go-packages.android ];
     };
   };
-  currentHostConfig = if isDarwin then hostConfigs.darwin else hostConfigs.linux;
-  currentHostMobileTargets = currentHostConfig.mobileTargets;
-  mobileBuildScript = lib.concatMapStrings (target: ''
-    echo
-    echo "Building mobile library for ${target.name}"
-    echo
-    GOPATH=${gomobile.dev}:$GOPATH \
-    PATH=${lib.makeBinPath [ gomobile.bin openjdk ]}:$PATH \
-    ${target.envVars} \
-    gomobile bind ${goBuildFlags} -target=${target.name} ${target.gomobileExtraFlags} \
-      -o ${target.outputFileName} \
-      ${goBuildLdFlags} \
-      ${goPackagePath}/mobile
-  '') currentHostMobileTargets;
-  mobileInstallScript = lib.concatMapStrings (target: ''
-    mkdir -p $out/lib/${target.name}
-    mv ${target.outputFileName} $out/lib/${target.name}/
-  '') currentHostMobileTargets;
-  desktopOutputFileName = currentHostConfig.desktopOutputFileName;
-  desktopSystem = hostPlatform.system;
-  removeReferences = [ go ];
-  removeExpr = refs: ''remove-references-to ${lib.concatMapStrings (ref: " -t ${ref}") refs}'';
-  goBuildFlags = "-v";
-  goBuildLdFlags = "-ldflags=-s";
-  xcodeWrapper = composeXcodeWrapper xcodewrapperArgs;
-  status-go = buildGoPackage rec {
-    inherit goPackagePath version rev;
-    name = "${repo}-${version}";
+  currentHostConfig = if stdenv.isDarwin then hostConfigs.darwin else hostConfigs.linux;
 
-    src = pkgs.fetchFromGitHub { inherit rev owner repo sha256; };
+  goBuildFlags = concatStringsSep " " [ "-v" (optionalString enableNimbus "-tags='nimbus'") ];
+  # status-go params to be set at build time, important for About section and metrics
+  goBuildParams = {
+    GitCommit = srcData.rev;
+    Version = srcData.cleanVersion;
+  };
+  # These are necessary for status-go to show correct version
+  paramsLdFlags = attrValues (mapAttrs (name: value:
+    "-X github.com/status-im/status-go/params.${name}=${value}"
+  ) goBuildParams);
 
-    nativeBuildInputs = [ gomobile openjdk ]
-      ++ lib.optional isDarwin xcodeWrapper;
+  goBuildLdFlags = paramsLdFlags ++ [
+    "-s" # -s disabled symbol table
+    "-w" # -w disables DWARF debugging information
+  ];
 
-    # Fixes Cgo related build failures (see https://github.com/NixOS/nixpkgs/issues/25959 )
-    hardeningDisable = [ "fortify" ];
+  statusGoArgs = { inherit (srcData) src owner repo rev cleanVersion goPackagePath; inherit goBuildFlags goBuildLdFlags; };
+  status-go-packages = {
+    desktop = buildStatusGoDesktopLib (statusGoArgs // {
+      outputFileName = "libstatus.a";
+      hostSystem = stdenv.hostPlatform.system;
+      host = currentHostConfig.name;
+    });
 
-    # gomobile doesn't seem to be able to pass -ldflags with multiple values correctly to go build, so we just patch files here  
-    patchPhase = ''
-      date=$(date -u '+%Y-%m-%d.%H:%M:%S')
+    android = buildStatusGoMobileLib (statusGoArgs // {
+      host = mobileConfigs.android.name;
+      targetConfig = mobileConfigs.android;
+    });
 
-      substituteInPlace cmd/statusd/main.go --replace \
-        "buildStamp = \"N/A\"" \
-        "buildStamp = \"$date\""
-      substituteInPlace params/version.go --replace \
-        "var Version string" \
-        "var Version string = \"${version}\""
-      substituteInPlace params/version.go --replace \
-        "var GitCommit string" \
-        "var GitCommit string = \"${rev}\""
-      substituteInPlace vendor/github.com/ethereum/go-ethereum/metrics/metrics.go --replace \
-        "var EnabledStr = \"false\"" \
-        "var EnabledStr = \"true\""
-    '';
+    ios = buildStatusGoMobileLib (statusGoArgs // {
+      host = mobileConfigs.ios.name;
+      targetConfig = mobileConfigs.ios;
+    });
+  };
 
-    # we print out the version so that we fail fast in case there's any problem running xcrun, instead of failing at the end of the build
-    preConfigure = lib.optionalString isDarwin ''
-      xcrun xcodebuild -version
-    '';
-
-    buildPhase = ''
-      runHook preBuild
-
-      runHook renameImports
-
-      pushd "$NIX_BUILD_TOP/go/src/${goPackagePath}" >/dev/null
-
-      echo
-      echo "Building desktop library"
-      echo
-      #GOOS=windows GOARCH=amd64 CGO_ENABLED=1 go build ${goBuildFlags} -buildmode=c-archive -o $out/${desktopOutputFileName} ./lib
-      go build -o $out/${desktopOutputFileName} ${goBuildFlags} -buildmode=c-archive ${goBuildLdFlags} ./lib
-
-      # Build command-line tools
-      for name in ./cmd/*; do
-        echo
-        echo "Building $name"
-        echo
-        go install ${goBuildFlags} $name
-      done
-
-      popd >/dev/null
-
-      # Build mobile libraries
-      # TODO: Manage to pass -s -w to -ldflags. Seems to only accept a single flag
-      ${mobileBuildScript}
-
-      runHook postBuild
-    '';
-
-    postInstall = ''
-      mkdir -p $bin
-      cp -r "$NIX_BUILD_TOP/go/bin/" $bin
-
-      ${mobileInstallScript}
-
-      mkdir -p $out/lib/${desktopSystem} $out/include
-      mv $out/${desktopOutputFileName} $out/lib/${desktopSystem}
-      mv $out/libstatus.h $out/include
-    '';
-
-    # remove hardcoded paths to go package in /nix/store, otherwise Nix will fail the build
-    preFixup = ''
-      find $out -type f -exec ${removeExpr removeReferences} '{}' + || true
-    '';
-
-    outputs = [ "out" "bin" ];
-
-    meta = {
-      description = "The Status module that consumes go-ethereum.";
-      license = lib.licenses.mpl20;
-      maintainers = with lib.maintainers; [ pombeirp ];
-      platforms = with lib.platforms; linux ++ darwin;
+  android = rec {
+    buildInputs = [ status-go-packages.android ];
+    shell = mkShell {
+      inherit buildInputs;
+      shellHook = ''
+        # These variables are used by the Status Android Gradle build script in android/build.gradle
+        export STATUS_GO_ANDROID_LIBDIR=${status-go-packages.android}/lib
+      '';
     };
   };
+  ios = rec {
+    buildInputs = [ status-go-packages.ios ];
+    shell = mkShell {
+      inherit buildInputs;
+      shellHook = ''
+        # These variables are used by the iOS build preparation section in nix/mobile/ios/default.nix
+        export STATUS_GO_IOS_LIBDIR=${status-go-packages.ios}/lib/Statusgo.framework
+      '';
+    };
+  };
+  desktop = rec {
+    buildInputs = [ status-go-packages.desktop ];
+    shell = mkShell {
+      inherit buildInputs;
+      shellHook = ''
+        # These variables are used by the Status Desktop CMake build script in modules/react-native-status/desktop/CMakeLists.txt
+        export STATUS_GO_DESKTOP_INCLUDEDIR=${status-go-packages.desktop}/include
+        export STATUS_GO_DESKTOP_LIBDIR=${status-go-packages.desktop}/lib
+      '';
+    };
+  };
+  platforms = [ android ios desktop ];
 
 in {
-  package = status-go;
-  hardeningDisable = status-go.hardeningDisable;
-  shellHook =
-    ''
-      export STATUS_GO_INCLUDEDIR=${status-go}/include
-      export STATUS_GO_LIBDIR=${status-go}/lib
-      export STATUS_GO_BINDIR=${status-go.bin}/bin
-    '';
+  shell = mergeSh mkShell {} (catAttrs "shell" platforms);
+
+  # CHILD DERIVATIONS
+  inherit android ios desktop;
 }

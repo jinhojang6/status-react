@@ -10,7 +10,7 @@
   [{:keys [on-value-change checked? accessibility-label
            disabled? style icon-style]
     :or   {accessibility-label :checkbox}}]
-  [react/touchable-highlight
+  [(if on-value-change react/touchable-highlight react/view)
    (merge {:style               (merge
                                  styles/wrapper
                                  style)
@@ -18,22 +18,7 @@
           (when on-value-change
             {:on-press #(on-value-change (not checked?))}))
    (if checked?
-     [icons/icon
+     [icons/tiny-icon
       :tiny-icons/tiny-check {:container-style (styles/icon-check-container true)
                               :color colors/white}]
      [react/view {:style  (styles/icon-check-container false)}])])
-
-(defn radio-button
-  [{:keys [on-value-change checked? accessibility-label
-           disabled? style icon-style]
-    :or   {accessibility-label :radio-button}}]
-  [react/touchable-highlight
-   (merge {:style               (merge
-                                 styles/wrapper
-                                 style)
-           :accessibility-label accessibility-label}
-          (when on-value-change
-            {:on-press #(on-value-change (not checked?))}))
-   (if checked?
-     [icons/icon :main-icons/check {:color colors/blue}]
-     [react/view])])

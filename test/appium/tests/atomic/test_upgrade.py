@@ -1,5 +1,5 @@
 import pytest
-from tests import marks
+from tests import marks, pytest_config_global
 from tests.base_test_case import SingleDeviceTestCase
 from views.sign_in_view import SignInView
 
@@ -8,10 +8,12 @@ class TestUpgradeApplication(SingleDeviceTestCase):
 
     def setup_method(self, method, **kwargs):
         super(TestUpgradeApplication, self).setup_method(method, app='sauce-storage:app-release.apk')
-        self.apk_name = ([i for i in [i for i in pytest.config.getoption('apk').split('/') if '.apk' in i]])[0]
+        self.apk_name = ([i for i in [i for i in pytest_config_global['apk'].split('/') if '.apk' in i]])[0]
 
     @marks.testrail_id(5713)
     @marks.upgrade
+    @marks.skip
+    # skipped as no support for upgrade now
     def test_apk_upgrade(self):
         sign_in = SignInView(self.driver)
         home = sign_in.create_user()

@@ -1,12 +1,12 @@
 (ns status-im.ui.components.connectivity.styles
-  (:require-macros [status-im.utils.styles :refer [defnstyle]])
   (:require [status-im.ui.components.colors :as colors]
             [status-im.utils.platform :as platform]))
 
-(defnstyle text-wrapper
-  [{:keys [window-width modal? height background-color opacity]}]
-  (cond-> {:flex-direction :row
-           :justify-content :center
+(defn text-wrapper
+  [{:keys [window-width height background-color opacity transform]}]
+  (cond-> {:flex-direction   :row
+           :justify-content  :center
+           :transform        [{:translateY transform}]
            :opacity          opacity
            :background-color (or background-color colors/gray)
            :height           height}

@@ -7,10 +7,9 @@
                                                       new-group
                                                       add-participants-toggle-list]]
             [status-im.ui.screens.profile.group-chat.views :refer [group-chat-profile]]
-            [status-im.ui.screens.accounts.create.views :as create.views]
-            [status-im.ui.screens.accounts.login.views :as login.views]
-            [status-im.ui.screens.accounts.recover.views :as recover.views]
-            [status-im.ui.screens.accounts.views :as accounts.views]
+            [status-im.ui.screens.multiaccounts.login.views :as login.views]
+            [status-im.ui.screens.multiaccounts.recover.views :as recover.views]
+            [status-im.ui.screens.multiaccounts.views :as multiaccounts.views]
             [status-im.utils.platform :as platform]
             [status-im.i18n :as i18n]
             [status-im.react-native.js-dependencies :as rn-dependencies]
@@ -20,7 +19,7 @@
 (enable-console-print!)
 
 (views/defview main []
-  (views/letsubs [view-id [:get :view-id]
+  (views/letsubs [view-id [:view-id]
                   version [:get-app-version]]
     {:component-did-mount
      (fn []
@@ -31,9 +30,7 @@
 
     (let [component (case view-id
                       :intro intro.views/intro
-                      :accounts accounts.views/accounts
-                      :recover recover.views/recover
-                      :create-account create.views/create-account
+                      :multiaccounts multiaccounts.views/multiaccounts
                       :new-group  new-group
                       :contact-toggle-list contact-toggle-list
                       :group-chat-profile group-chat-profile

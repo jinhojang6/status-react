@@ -1,44 +1,56 @@
 (ns status-im.ui.screens.profile.components.styles
-  (:require-macros [status-im.utils.styles :refer [defstyle]])
-  (:require [status-im.ui.components.styles :as styles]
-            [status-im.ui.components.colors :as colors]))
+  (:require [status-im.ui.components.colors :as colors]
+            [status-im.utils.styles :as styles]))
 
 ;; profile header elements
 
 (def profile-header-display
-  {:flex-direction  :column
-   :justify-content :center
+  {:flex-direction  :row
+   :justify-content :flex-start
    :align-items     :center})
 
 (def profile-header-edit
   {:flex-direction  :column
    :justify-content :center})
 
-(defstyle profile-name-text
-  {:padding-vertical 8
-   :text-align       :center
-   :font-weight      "700"})
+(def profile-name-text
+  {:typography      :header
+   :line-height     28
+   :text-align      :left})
 
-(defstyle profile-three-words
-  {:font-size   12
-   :text-align  :center
-   :color       colors/gray})
+(def profile-name-text-with-subtitle
+  {:margin-vertical 5
+   :typography      :header
+   :line-height     28
+   :text-align      :left})
 
-(defstyle profile-name-input-text
-  {:text-align  :center
-   :flex        1
-   :desktop     {:height 20
-                 :width 200}
-   :ios         {:margin-top          1
-                 :height              45
-                 :border-bottom-width 1
-                 :border-bottom-color colors/gray-light}
-   :android     {:border-bottom-width 2
-                 :border-bottom-color colors/blue}})
+(def profile-three-words
+  {:color       colors/gray})
+
+(styles/def profile-name-input-text
+  {:text-align :center
+   :flex       1
+   :desktop    {:height 20
+                :width 200}
+   :ios        {:margin-top          1
+                :height              45
+                :border-bottom-width 1
+                :border-bottom-color colors/black-transparent}
+   :android    {:border-bottom-width 2
+                :border-bottom-color colors/blue}})
 
 (def profile-header-name-container
   {:flex            1
-   :justify-content :center})
+   :justify-content :center
+   :align-items     :flex-start
+   :margin-left     16})
+
+(def profile-header-name-container-with-subtitle
+  {:flex            1
+   :justify-content :flex-start
+   :align-items     :flex-start
+   :align-self      :stretch
+   :margin-left     16})
 
 ;; settings items elements
 
@@ -46,11 +58,12 @@
   {:margin-left 16})
 
 (def settings-item
-  {:padding-horizontal 16
-   :flex               1
-   :flex-direction     :row
-   :align-items        :center
-   :height             52})
+  {:padding-left   16
+   :padding-right  8
+   :flex           1
+   :flex-direction :row
+   :align-items    :center
+   :height         52})
 
 (def settings-item-icon
   {:background-color colors/blue-light
@@ -62,9 +75,9 @@
    :align-items      :center})
 
 (def settings-item-text-wrapper
-  {:flex             1
-   :flex-direction   :row
-   :justify-content  :space-between})
+  {:flex            1
+   :flex-direction  :row
+   :justify-content :space-between})
 
 (def settings-item-text
   {:flex-wrap :nowrap})
@@ -99,3 +112,11 @@
 
 (def profile-form
   {:padding-vertical 16})
+
+;; sheets
+
+(def sheet-text
+  {:color       colors/gray
+   :padding     24
+   :line-height 22
+   :font-size   15})

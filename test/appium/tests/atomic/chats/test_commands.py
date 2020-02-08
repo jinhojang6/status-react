@@ -13,8 +13,10 @@ from views.sign_in_view import SignInView
 @marks.transaction
 class TestCommandsMultipleDevices(MultipleDeviceTestCase):
 
-    @marks.critical
     @marks.testrail_id(5334)
+    @marks.critical
+    @marks.skip
+    # TODO: temporary skipped due to 8601
     def test_network_mismatch_for_send_request_commands(self):
         sender = transaction_senders['D']
         self.create_drivers(2)
@@ -71,10 +73,12 @@ class TestCommandsMultipleDevices(MultipleDeviceTestCase):
                 self.errors.append("Request funds message doesn't contain text 'Transaction Request'")
         except TimeoutException:
             self.errors.append('Request funds message was not received')
-        self.verify_no_errors()
+        self.errors.verify_no_errors()
 
     @marks.testrail_id(5306)
     @marks.critical
+    @marks.skip
+    # TODO: temporary skipped due to 8601
     def test_send_eth_in_1_1_chat(self):
         recipient = transaction_recipients['A']
         sender = transaction_senders['A']
@@ -86,7 +90,7 @@ class TestCommandsMultipleDevices(MultipleDeviceTestCase):
         wallet_1.set_up_wallet()
         wallet_1.home_button.click()
         wallet_2.set_up_wallet()
-        init_balance = wallet_2.get_eth_value()
+        init_balance = wallet_2.get_asset_amount_by_name('ETHro')
         wallet_2.home_button.click()
 
         chat_1 = home_1.add_contact(recipient['public_key'])
@@ -96,35 +100,18 @@ class TestCommandsMultipleDevices(MultipleDeviceTestCase):
         chat_1.asset_by_name('ETHro').click()
         chat_1.send_as_keyevent(amount)
         send_transaction_view = chat_1.get_send_transaction_view()
-        chat_1.send_message_button.click_until_presence_of_element(send_transaction_view.sign_transaction_button)
+        chat_1.send_message_button.click_until_presence_of_element(send_transaction_view.sign_with_password)
 
-        send_transaction_view.chose_recipient_button.find_element().click()
-        if send_transaction_view.recent_recipients_button.is_element_displayed():
-            self.errors.append('Recipient field is editable')
-            send_transaction_view.click_system_back_button()
-
-        send_transaction_view.select_asset_button.click()
-        if not send_transaction_view.chose_recipient_button.is_element_displayed():
-            self.errors.append('Asset field is editable')
-            send_transaction_view.back_button.click()
-
-        if send_transaction_view.amount_edit_box.is_element_displayed():
-            self.errors.append('Amount field is editable')
-
-        chat_1.driver.swipe(500, 1000, 500, 500)
-
-        send_transaction_view.advanced_button.click()
-        send_transaction_view.transaction_fee_button.click()
+        send_transaction_view.network_fee_button.click()
         gas_limit = '25000'
         send_transaction_view.gas_limit_input.clear()
         send_transaction_view.gas_limit_input.set_value(gas_limit)
-        gas_price = '1'
+        gas_price = str(round(float(send_transaction_view.gas_price_input.text)) + 10)
         send_transaction_view.gas_price_input.clear()
         send_transaction_view.gas_price_input.set_value(gas_price)
-        send_transaction_view.total_fee_input.click()
         if send_transaction_view.total_fee_input.text != '%s ETHro' % (d(gas_limit) * d(gas_price) / d(1000000000)):
             self.errors.append('Gas limit and/or gas price fields were not edited')
-        send_transaction_view.done_button.click()
+        send_transaction_view.update_fee_button.click()
         send_transaction_view.sign_transaction()
 
         if not chat_1.chat_element_by_text(amount).is_element_displayed():
@@ -136,14 +123,16 @@ class TestCommandsMultipleDevices(MultipleDeviceTestCase):
         chat_2.get_back_to_home_view()
         home_2.wallet_button.click()
         try:
-            wallet_2.wait_balance_changed_on_wallet_screen(expected_balance=init_balance + float(amount))
+            wallet_2.wait_balance_is_equal_expected_amount('ETHro', expected_balance=init_balance + float(amount))
             self.network_api.find_transaction_by_unique_amount(recipient['address'], amount)
         except Failed as e:
             self.errors.append(e.msg)
-        self.verify_no_errors()
+        self.errors.verify_no_errors()
 
     @marks.testrail_id(5318)
     @marks.critical
+    @marks.skip
+    # TODO: temporary skipped due to 8601
     def test_request_and_receive_eth_in_1_1_chat(self):
         recipient = transaction_recipients['B']
         sender = transaction_senders['J']
@@ -155,7 +144,7 @@ class TestCommandsMultipleDevices(MultipleDeviceTestCase):
         wallet_1.set_up_wallet()
         wallet_1.home_button.click()
         wallet_2.set_up_wallet()
-        init_balance = wallet_2.get_eth_value()
+        init_balance = wallet_2.get_asset_amount_by_name('ETHro')
         wallet_2.home_button.click()
 
         chat_2 = home_2.add_contact(sender['public_key'])
@@ -173,21 +162,25 @@ class TestCommandsMultipleDevices(MultipleDeviceTestCase):
         chat_2.get_back_to_home_view()
         home_2.wallet_button.click()
         try:
-            wallet_2.wait_balance_changed_on_wallet_screen(expected_balance=init_balance + float(amount))
+            wallet_2.wait_balance_is_equal_expected_amount('ETHro', expected_balance=init_balance + float(amount))
             self.network_api.find_transaction_by_unique_amount(recipient['address'], amount)
         except Failed as e:
             self.errors.append(e.msg)
-        self.verify_no_errors()
+        self.errors.verify_no_errors()
 
     @marks.testrail_id(5324)
     @marks.critical
+    @marks.skip
+    # TODO: temporary skipped due to 8601
     def test_request_eth_in_wallet(self):
         self.create_drivers(2)
         device_1, device_2 = SignInView(self.drivers[0]), SignInView(self.drivers[1])
-        username_1 = 'user_1'
         sender = transaction_senders['O']
 
-        home_1 = device_1.create_user(username=username_1)
+        home_1 = device_1.create_user()
+        profile_1 = home_1.profile_button.click()
+        default_username_1 = profile_1.default_username_text.text
+        home_1 = profile_1.get_back_to_home_view()
         home_2 = device_2.recover_access(passphrase=sender['passphrase'])
 
         home_1.add_contact(sender['public_key'])
@@ -195,6 +188,7 @@ class TestCommandsMultipleDevices(MultipleDeviceTestCase):
         wallet_1 = home_1.wallet_button.click()
         wallet_1.set_up_wallet()
 
+        wallet_1.accounts_status_account.click()
         send_transaction_device_1 = wallet_1.receive_transaction_button.click_until_presence_of_element(
             wallet_1.send_transaction_request)
         wallet_1.send_transaction_request.click()
@@ -208,7 +202,7 @@ class TestCommandsMultipleDevices(MultipleDeviceTestCase):
         sender_button.click()
         wallet_1.send_request_button.click()
 
-        chat_2 = home_2.get_chat_with_user(username_1).click()
+        chat_2 = home_2.get_chat_with_user(default_username_1).click()
         chat_element = chat_2.chat_element_by_text(amount)
         try:
             chat_element.wait_for_visibility_of_element(120)
@@ -218,10 +212,12 @@ class TestCommandsMultipleDevices(MultipleDeviceTestCase):
                 self.errors.append("Request funds message doesn't contain 'Send' button")
         except TimeoutException:
             self.errors.append('Request funds message was not received')
-        self.verify_no_errors()
+        self.errors.verify_no_errors()
 
     @marks.testrail_id(5383)
     @marks.high
+    @marks.skip
+    # TODO: temporary skipped due to 8601
     def test_contact_profile_send_transaction(self):
         self.create_drivers(1)
         recipient = basic_user
@@ -251,6 +247,8 @@ class TestCommandsMultipleDevices(MultipleDeviceTestCase):
 
     @marks.testrail_id(5348)
     @marks.critical
+    @marks.skip
+    # TODO: temporary skipped due to 8601
     def test_send_tokens_in_1_1_chat(self):
         recipient = transaction_recipients['C']
         sender = transaction_senders['C']
@@ -278,10 +276,12 @@ class TestCommandsMultipleDevices(MultipleDeviceTestCase):
             self.network_api.find_transaction_by_unique_amount(recipient['address'], amount, token=True)
         except Failed as e:
             self.errors.append(e.msg)
-        self.verify_no_errors()
+        self.errors.verify_no_errors()
 
     @marks.testrail_id(5352)
     @marks.critical
+    @marks.skip
+    # TODO: temporary skipped due to 8601
     def test_request_and_receive_tokens_in_1_1_chat(self):
         recipient = transaction_recipients['D']
         sender = transaction_senders['B']
@@ -313,10 +313,12 @@ class TestCommandsMultipleDevices(MultipleDeviceTestCase):
             self.network_api.find_transaction_by_unique_amount(recipient['address'], amount, token=True)
         except Failed as e:
             self.errors.append(e.msg)
-        self.verify_no_errors()
+        self.errors.verify_no_errors()
 
     @marks.testrail_id(5376)
     @marks.high
+    @marks.skip
+    # TODO: temporary skipped due to 8601
     def test_transaction_confirmed_on_recipient_side(self):
         recipient = transaction_recipients['E']
         sender = transaction_senders['E']
@@ -344,6 +346,8 @@ class TestCommandsSingleDevices(SingleDeviceTestCase):
 
     @marks.testrail_id(5349)
     @marks.high
+    @marks.skip
+    # TODO: temporary skipped due to 8601
     def test_send_request_not_enabled_tokens(self):
         sign_in = SignInView(self.driver)
         home = sign_in.create_user()
@@ -357,11 +361,13 @@ class TestCommandsSingleDevices(SingleDeviceTestCase):
         chat.request_command.click()
         if chat.asset_by_name('MDS').is_element_displayed():
             self.errors.append('Token which is not enabled in wallet can be requested in 1-1 chat')
-        self.verify_no_errors()
+        self.errors.verify_no_errors()
 
     @marks.logcat
     @marks.testrail_id(5417)
     @marks.critical
+    @marks.skip
+    # TODO: temporary skipped due to 8601
     def test_logcat_send_transaction_in_1_1_chat(self):
         sender = transaction_senders['F']
         sign_in = SignInView(self.driver)
@@ -372,10 +378,14 @@ class TestCommandsSingleDevices(SingleDeviceTestCase):
         chat = home.add_contact(basic_user['public_key'])
         amount = chat.get_unique_amount()
         chat.send_transaction_in_1_1_chat('ETHro', amount, unique_password)
-        chat.check_no_values_in_logcat(password=unique_password)
+        values_in_logcat = chat.find_values_in_logcat(password=unique_password)
+        if values_in_logcat:
+            self.driver.fail(values_in_logcat)
 
     @marks.testrail_id(5347)
     @marks.high
+    @marks.skip
+    # TODO: temporary skipped due to 8601
     def test_send_transaction_details_in_1_1_chat(self):
         recipient = basic_user
         sender = transaction_senders['G']
@@ -392,18 +402,20 @@ class TestCommandsSingleDevices(SingleDeviceTestCase):
         chat.asset_by_name('ETHro').click()
         chat.send_as_keyevent(amount)
         send_transaction_view = chat.get_send_transaction_view()
-        chat.send_message_button.click_until_presence_of_element(send_transaction_view.sign_transaction_button)
+        chat.send_message_button.click_until_presence_of_element(send_transaction_view.sign_with_password)
 
-        if not send_transaction_view.element_by_text(recipient['username']).is_element_displayed():
-            self.errors.append('Recipient name is not shown')
-        if not send_transaction_view.element_by_text('ETHro').is_element_displayed():
+        # if not send_transaction_view.element_by_text(recipient['username']).is_element_displayed():
+        #     self.errors.append('Recipient name is not shown')
+        if not send_transaction_view.element_by_text_part('ETHro').is_element_displayed():
             self.errors.append("Asset field doesn't contain 'ETHro' text")
-        if not send_transaction_view.element_by_text(amount).is_element_displayed():
+        if not send_transaction_view.element_by_text_part(amount).is_element_displayed():
             self.errors.append('Amount is not visible')
-        self.verify_no_errors()
+        self.errors.verify_no_errors()
 
     @marks.testrail_id(5377)
     @marks.high
+    @marks.skip
+    # TODO: temporary skipped due to 8601
     def test_transaction_confirmed_on_sender_side(self):
         sender = transaction_senders['H']
         sign_in = SignInView(self.driver)
@@ -416,10 +428,12 @@ class TestCommandsSingleDevices(SingleDeviceTestCase):
         chat.send_transaction_in_1_1_chat('ETHro', amount)
         self.network_api.wait_for_confirmation_of_transaction(sender['address'], amount)
         if not chat.chat_element_by_text(amount).contains_text('Confirmed', wait_time=90):
-            pytest.fail('Status "Confirmed" is not shown under transaction for the sender')
+            self.driver.fail('Status "Confirmed" is not shown under transaction for the sender')
 
     @marks.testrail_id(5410)
     @marks.high
+    @marks.skip
+    # TODO: temporary skipped due to 8601
     def test_insufficient_funds_1_1_chat_0_balance(self):
         sign_in_view = SignInView(self.driver)
         sign_in_view.create_user()
@@ -436,28 +450,37 @@ class TestCommandsSingleDevices(SingleDeviceTestCase):
         error_text = send_transaction.element_by_text('Insufficient funds')
         if not error_text.is_element_displayed():
             self.errors.append("'Insufficient funds' error is now shown when sending 1 ETH from chat with balance 0")
-        send_transaction.cross_icon.click()
+        send_transaction.cancel_button.click()
         chat_view.commands_button.click()
+
+        # enable STT in wallet
+        chat_view.wallet_button.click()
+        wallet_view.select_asset("STT")
+        wallet_view.home_button.click()
+
         chat_view.send_command.click()
         chat_view.asset_by_name('STT').click()
         chat_view.send_as_keyevent('1')
         chat_view.send_message_button.click()
         if not error_text.is_element_displayed():
             self.errors.append("'Insufficient funds' error is now shown when sending 1 STT from chat with balance 0")
-        self.verify_no_errors()
+        self.errors.verify_no_errors()
 
     @marks.testrail_id(5473)
     @marks.medium
+    @marks.skip
+    # TODO: temporary skipped due to 8601
     def test_insufficient_funds_1_1_chat_positive_balance(self):
         sender = transaction_senders['I']
         sign_in_view = SignInView(self.driver)
         sign_in_view.recover_access(sender['passphrase'])
         wallet_view = sign_in_view.wallet_button.click()
         wallet_view.set_up_wallet()
-        eth_value = wallet_view.get_eth_value()
-        stt_value = wallet_view.get_stt_value()
+        wallet_view.accounts_status_account.click()
+        eth_value = wallet_view.get_asset_amount_by_name('ETHro')
+        stt_value = wallet_view.get_asset_amount_by_name('STT')
         if eth_value == 0 or stt_value == 0:
-            pytest.fail('No funds!')
+            self.driver.fail('No funds!')
         home_view = wallet_view.home_button.click()
         chat_view = home_view.add_contact(basic_user['public_key'])
         chat_view.commands_button.click()
@@ -471,7 +494,7 @@ class TestCommandsSingleDevices(SingleDeviceTestCase):
             self.errors.append(
                 "'Insufficient funds' error is now shown when sending %s ETHro from chat with balance %s" % (
                     round(eth_value + 1), eth_value))
-        send_transaction.cross_icon.click()
+        send_transaction.cancel_button.click_until_presence_of_element(chat_view.commands_button)
         chat_view.commands_button.click()
         chat_view.send_command.click()
         chat_view.asset_by_name('STT').scroll_to_element()
@@ -482,4 +505,4 @@ class TestCommandsSingleDevices(SingleDeviceTestCase):
             self.errors.append(
                 "'Insufficient funds' error is now shown when sending %s STT from chat with balance %s" % (
                     round(stt_value + 1), stt_value))
-        self.verify_no_errors()
+        self.errors.verify_no_errors()

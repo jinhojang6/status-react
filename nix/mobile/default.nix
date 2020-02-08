@@ -1,33 +1,41 @@
-{ config, stdenv, pkgs, target-os ? "all", status-go }:
-
-with pkgs;
-with stdenv;
+{ config, lib, stdenvNoCC, callPackage, status-go,
+  localMavenRepoBuilder, composeXcodeWrapper, mkShell, mergeSh }:
 
 let
-  gradle = gradle_4_10;
-  targetAndroid = {
-    "android" = true;
-    "all" = true;
-  }.${target-os} or false;
-  targetIOS = {
-    "ios" = true;
-    "all" = true;
-  }.${target-os} or false;
+  inherit (lib) catAttrs concatStrings optional unique;
+
   xcodewrapperArgs = {
-    version = "10.1";
+    version = "11.3.1";
   };
-  android = callPackage ./android.nix { inherit config; };
+  xcodeWrapper = composeXcodeWrapper xcodewrapperArgs;
+  fastlane = callPackage ./fastlane { };
+  androidPlatform = callPackage ./android {
+    inherit localMavenRepoBuilder projectNodePackage;
+    status-go = status-go.android;
+  };
+  iosPlatform = callPackage ./ios {
+    inherit xcodeWrapper projectNodePackage fastlane;
+    status-go = status-go.ios;
+  };
+  selectedSources = [
+    fastlane
+    status-go.android
+    status-go.ios
+    androidPlatform
+    iosPlatform
+  ];
 
-in
-  {
-    inherit (android) androidComposition;
-    inherit xcodewrapperArgs;
+  projectNodePackage = callPackage ./node-package.nix { inherit (lib) importJSON; };
 
-    buildInputs =
-      lib.optional targetAndroid android.buildInputs;
-    shellHook =
-      lib.optionalString targetIOS ''
-        export RCTSTATUS_FILEPATH=${status-go}/lib/ios/Statusgo.framework
-      '' +
-      lib.optionalString targetAndroid android.shellHook;
-  }
+in {
+  buildInputs = unique (catAttrs "buildInputs" selectedSources);
+
+  shell = mergeSh (mkShell {}) (catAttrs "shell" selectedSources);
+
+  # CHILD DERIVATIONS
+  android = androidPlatform;
+  ios = iosPlatform;
+
+  # TARGETS
+  inherit fastlane xcodeWrapper;
+}

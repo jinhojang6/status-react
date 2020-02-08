@@ -4,17 +4,16 @@
             [clojure.string :as string]
             [re-frame.core :as re-frame]
             [status-im.i18n :as i18n]
-            [status-im.ui.components.bottom-bar.styles :as main-tabs.styles]
+            [status-im.ui.components.tabbar.styles :as main-tabs.styles]
             [status-im.ui.components.styles :as components.styles]
             [status-im.constants :as constants]
             [status-im.utils.platform :as utils.platform]
             [status-im.ui.components.contact.contact :refer [toggle-contact-view]]
-            [status-im.ui.components.button.view :as buttons]
+            [status-im.ui.components.button :as button]
             [status-im.ui.components.list-selection :as list-selection]
             [status-im.ui.components.common.common :as components.common]
             [status-im.ui.components.react :as react]
             [status-im.ui.components.list.views :as list]
-            [status-im.ui.components.status-bar.view :as status-bar]
             [status-im.ui.components.toolbar.view :as toolbar]
             [status-im.utils.platform :as platform]
             [status-im.ui.components.contact.contact :as contact]
@@ -106,7 +105,11 @@
    [react/text
     {:style styles/no-contact-text}
     (i18n/label :t/group-chat-no-contacts)]
-   [buttons/secondary-button {:on-press handle-invite-friends-pressed} (i18n/label :t/invite-friends)]])
+   (when-not platform/desktop?
+     [button/button
+      {:type     :secondary
+       :on-press handle-invite-friends-pressed
+       :label    :t/invite-friends}])])
 
 (views/defview bottom-container [{:keys [on-press disabled label accessibility-label]}]
   [react/view {:style main-tabs.styles/tabs-container}
@@ -124,7 +127,6 @@
   (views/letsubs [contacts                [:contacts/active]
                   selected-contacts-count [:selected-contacts-count]]
     [react/keyboard-avoiding-view {:style styles/group-container}
-     [status-bar/status-bar]
      [toolbar
       (i18n/label :t/new-group-chat)
       (i18n/label :t/group-chat-members-count
@@ -140,11 +142,10 @@
 ;; Set name of new group-chat
 (views/defview new-group []
   (views/letsubs [contacts   [:selected-group-contacts]
-                  group-name [:get :new-chat-name]]
+                  group-name [:new-chat-name]]
     (let [save-btn-enabled? (and (spec/valid? :global/not-empty-string group-name) (pos? (count contacts)))]
       [react/keyboard-avoiding-view (merge {:behavior :padding}
                                            styles/group-container)
-       [status-bar/status-bar]
        [toolbar
         (i18n/label :t/new-group-chat)
         (i18n/label :t/group-chat-members-count
@@ -172,7 +173,6 @@
                   selected-contacts-count         [:selected-participants-count]]
     (let [current-participants-count (count (:contacts current-chat))]
       [react/keyboard-avoiding-view {:style styles/group-container}
-       [status-bar/status-bar]
        [toolbar
         name
         (i18n/label :t/group-chat-members-count

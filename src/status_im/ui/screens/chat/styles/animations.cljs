@@ -1,6 +1,7 @@
 (ns status-im.ui.screens.chat.styles.animations
   (:require [status-im.ui.components.styles :as common]
-            [status-im.ui.components.colors :as colors]))
+            [status-im.ui.components.colors :as colors]
+            [status-im.utils.platform :as platform]))
 
 (def header-draggable-icon "rgba(73, 84, 93, 0.23)")
 
@@ -13,7 +14,6 @@
 
 (defn expandable-container [anim-value bottom max-height]
   {:background-color colors/white
-   :height           anim-value
    :left             0
    :right            0
    :bottom           bottom
@@ -23,7 +23,8 @@
    :shadow-radius    12
    :shadow-opacity   0.12
    :shadow-color     colors/white
-   :max-height       max-height})
+   :max-height       max-height
+   :transform        [{:translateY anim-value}]})
 
 (def header-container
   {:min-height       19

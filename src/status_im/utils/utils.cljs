@@ -1,8 +1,13 @@
 (ns status-im.utils.utils
-  (:require [status-im.i18n :as i18n]
+  (:require [clojure.string :as string]
+            [goog.string :as gstring]
+            [goog.string.format]
+            [status-im.i18n :as i18n]
             [status-im.react-native.js-dependencies :as rn-dependencies]
             [re-frame.core :as re-frame]
-            [status-im.utils.platform :as platform]))
+            [status-im.utils.platform :as platform]
+            [status-im.ethereum.eip55 :as eip55]
+            [status-im.ethereum.core :as ethereum]))
 
 (defn show-popup
   ([title content]
@@ -18,6 +23,9 @@
                            (when on-dismiss {:onPress on-dismiss}))))
            (when on-dismiss
              (clj->js {:cancelable false})))))
+
+(defn vibrate []
+  #_(.vibrate (.-Vibration rn-dependencies/react-native)))
 
 (re-frame/reg-fx
  :utils/show-popup
@@ -69,6 +77,17 @@
                      :onPress             on-accept
                      :accessibility-label :yes-button})))))
 
+(defn get-shortened-address
+  "Takes first and last 4 digits from address including leading 0x
+  and adds unicode ellipsis in between"
+  [address]
+  (when address
+    (str (subs address 0 6) "\u2026" (subs address (- (count address) 4) (count address)))))
+
+(defn get-shortened-checksum-address [address]
+  (when address
+    (get-shortened-address (eip55/address->checksum (ethereum/normalized-hex address)))))
+
 ;; background-timer
 
 (defn set-timeout [cb ms]
@@ -110,3 +129,9 @@
   (if platform/desktop?
     (js/clearInterval id)
     (.clearInterval rn-dependencies/background-timer id)))
+
+(defn format-decimals [amount places]
+  (let [decimal-part (get (string/split (str amount) ".") 1)]
+    (if (> (count decimal-part) places)
+      (gstring/format (str "%." places "f") amount)
+      (or (str amount) 0))))

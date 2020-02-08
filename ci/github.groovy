@@ -1,6 +1,7 @@
 import groovy.json.JsonBuilder
 
-utils = load 'ci/utils.groovy'
+/* I'm using utils from ghcmgr to avoid another load */
+ghcmgr = load 'ci/ghcmgr.groovy'
 
 /**
  * Methods for interacting with GitHub API and related tools.
@@ -10,7 +11,7 @@ utils = load 'ci/utils.groovy'
 
 def notify(message) {
   def githubIssuesUrl = 'https://api.github.com/repos/status-im/status-react/issues'
-  def changeId = changeId() 
+  def changeId = ghcmgr.utils.changeId() 
   if (changeId == null) { return }
   def msgObj = [body: message]
   def msgJson = new JsonBuilder(msgObj).toPrettyString()
@@ -32,7 +33,7 @@ def notify(message) {
 def notifyFull(urls) {
   def msg = "#### :white_check_mark: "
   msg += "[${env.JOB_NAME}${currentBuild.displayName}](${currentBuild.absoluteUrl}) "
-  msg += "CI BUILD SUCCESSFUL in ${utils.buildDuration()} (${GIT_COMMIT.take(8)})\n"
+  msg += "CI BUILD SUCCESSFUL in ${ghcmgr.utils.buildDuration()} (${GIT_COMMIT.take(8)})\n"
   msg += '| | | | | |\n'
   msg += '|-|-|-|-|-|\n'
   msg += "| [Android](${urls.Apk}) ([e2e](${urls.Apke2e})) "
@@ -49,7 +50,7 @@ def notifyPRFailure() {
   def d = ":small_orange_diamond:"
   def msg = "#### :x: "
   msg += "[${env.JOB_NAME}${currentBuild.displayName}](${currentBuild.absoluteUrl}) ${d} "
-  msg += "${utils.buildDuration()} ${d} ${GIT_COMMIT.take(8)} ${d} "
+  msg += "${ghcmgr.utils.buildDuration()} ${d} ${GIT_COMMIT.take(8)} ${d} "
   msg += "[:page_facing_up: build log](${currentBuild.absoluteUrl}/consoleText)"
   //msg += "Failed in stage: ${env.STAGE_NAME}\n"
   //msg += "```${currentBuild.rawBuild.getLog(5)}```"
@@ -59,10 +60,10 @@ def notifyPRFailure() {
 def notifyPRSuccess() {
   def d = ":small_blue_diamond:"
   def msg = "#### :heavy_check_mark: "
-  def type = utils.getBuildType() == 'e2e' ? ' e2e' : ''
+  def type = ghcmgr.utils.isE2EBuild() ? ' e2e' : ''
   msg += "[${env.JOB_NAME}${currentBuild.displayName}](${currentBuild.absoluteUrl}) ${d} "
-  msg += "${utils.buildDuration()} ${d} ${GIT_COMMIT.take(8)} ${d} "
-  msg += "[:package: ${env.TARGET_OS}${type} package](${env.PKG_URL})"
+  msg += "${ghcmgr.utils.buildDuration()} ${d} ${GIT_COMMIT.take(8)} ${d} "
+  msg += "[:package: ${env.TARGET}${type} package](${env.PKG_URL})"
   notify(msg)
 }
 
@@ -81,7 +82,7 @@ def getDiffUrl(prev, current) {
 
 def getReleaseChanges() {
   def prevRelease = getPrevRelease()
-  def curRelease = utils.branchName()
+  def curRelease = ghcmgr.utils.branchName()
   def changes = ''
   try {
     changes = sh(returnStdout: true,
@@ -130,17 +131,15 @@ def releaseDelete(Map args) {
 }
 
 def releaseUpload(Map args) {
-  dir(args.pkgDir) {
-    args.files.each {
-      sh """
-        github-release upload \
-          -u '${args.user}' \
-          -r '${args.repo}' \
-          -t '${args.version}' \
-          -n ${it} \
-          -f ${it}
-      """
-    }
+  args.files.each {
+    sh """
+      github-release upload \
+        -u '${args.user}' \
+        -r '${args.repo}' \
+        -t '${args.version}' \
+        -n ${it} \
+        -f ${it}
+    """
   }
 }
 
@@ -162,10 +161,9 @@ def publishRelease(Map args) {
     draft: true,
     user: 'status-im',
     repo: 'status-react',
-    pkgDir: args.pkgDir,
     files: args.files,
     version: args.version,
-    branch: utils.branchName(),
+    branch: ghcmgr.utils.branchName(),
     desc: getReleaseChanges(),
   ]
   /* we release only for mobile right now */
@@ -180,16 +178,28 @@ def publishRelease(Map args) {
   }
 }
 
-def publishReleaseMobile() {
+def publishReleaseMobile(path='pkg') {
+  def found = findFiles(glob: "${path}/*")
+  if (found.size() == 0) {
+    sh "ls ${path}"
+    error("No file to release in ${path}")
+  }
   publishRelease(
-    version: utils.getVersion('mobile_files')+'-mobile',
-    pkgDir: 'pkg',
-    files: [ /* upload only mobile release files */
-      utils.pkgFilename(btype, 'ipa'),
-      utils.pkgFilename(btype, 'apk'),
-      utils.pkgFilename(btype, 'sha256'),
-    ]
+    version: ghcmgr.utils.getVersion(),
+    files: found.collect { it.path },
   )
+}
+
+def notifyPR(success) {
+  if (ghcmgr.utils.changeId() == null) { return }
+  try {
+    ghcmgr.postBuild(success)
+  } catch (ex) { /* fallback to posting directly to GitHub */
+    println "Failed to use GHCMGR: ${ex}"
+    switch (success) {
+      case true:  notifyPRSuccess(); break
+    }
+  }
 }
 
 return this

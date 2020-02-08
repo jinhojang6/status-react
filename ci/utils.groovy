@@ -1,32 +1,6 @@
-def getVersion(type = null) {
-  /* if type is undefined we get VERSION from repo root */
+def getVersion() {
   def path = "${env.WORKSPACE}/VERSION"
-  if (type != null) {
-    path = "${env.WORKSPACE}/${type}/VERSION"
-  }
   return readFile(path).trim()
-}
-
-def getToolVersion(name) {
-  def version = sh(
-    returnStdout: true,
-    script: "${env.WORKSPACE}/scripts/toolversion ${name}"
-  ).trim()
-  return version
-}
-
-def nix_sh(cmd) {
-  def isPure = env.TARGET_OS == 'linux'
-  def pureFlag = isPure ? '--pure' : ''
-
-  sh """
-    set +x
-    . ~/.nix-profile/etc/profile.d/nix.sh
-    set -x
-    nix-shell --argstr target-os \'${env.TARGET_OS}\' \\
-              ${pureFlag} --run \'${cmd}\' \\
-              \'${env.WORKSPACE}/shell.nix\'
-  """
 }
 
 def branchName() {
@@ -49,20 +23,26 @@ def gitCommit() {
   return GIT_COMMIT.take(6)
 }
 
-def pkgFilename(type, ext) {
-  return "StatusIm-${timestamp()}-${gitCommit()}-${type}.${ext}"
+def pkgFilename(type, ext, arch=null) {
+  /* the grep removes the null arch */
+  return [
+    "StatusIm", timestamp(), gitCommit(), type, arch,
+  ].grep().join('-') + ".${ext}"
 }
 
 def doGitRebase() {
-  /* rebasing on relases defeats the point of having a release branch */
-  if (params.BUILD_TYPE == 'release') {
-    println 'Skipping rebase due to release build...'
+  if (!isPRBuild()) {
+    println 'Skipping rebase due for non-PR build...'
     return
   }
+  def rebaseBranch = 'develop'
+  if (env.CHANGE_TARGET) { /* This is available for PR builds */
+    rebaseBranch = env.CHANGE_TARGET
+  }
   sh 'git status'
-  sh 'git fetch --force origin develop:develop'
+  sh "git fetch --force origin ${rebaseBranch}:${rebaseBranch}"
   try {
-    sh 'git rebase develop'
+    sh "git rebase ${rebaseBranch}"
   } catch (e) {
     sh 'git rebase --abort'
     throw e
@@ -72,9 +52,17 @@ def doGitRebase() {
 def genBuildNumber() {
   def number = sh(
     returnStdout: true,
-    script: "./scripts/gen_build_no.sh"
+    script: "${env.WORKSPACE}/scripts/version/gen_build_no.sh"
   ).trim()
   println "Build Number: ${number}"
+  return number
+}
+
+def readBuildNumber() {
+  def number = sh(
+    returnStdout: true,
+    script: "${env.WORKSPACE}/scripts/version/build_no.sh"
+  ).trim()
   return number
 }
 
@@ -105,59 +93,20 @@ def pkgFind(glob) {
   return found[0].path
 }
 
-def installJSDeps(platform) {
-  def attempt = 1
-  def maxAttempts = 10
-  def installed = false
-  /* prepare environment for specific platform build */
-  nix_sh "scripts/prepare-for-platform.sh ${platform}"
-  while (!installed && attempt <= maxAttempts) {
-    println "#${attempt} attempt to install npm deps"
-    nix_sh 'yarn install --frozen-lockfile'
-    installed = fileExists('node_modules/web3/index.js')
-    attemp = attempt + 1
-  }
+def isPRBuild() {
+  return env.JOB_NAME.startsWith('status-react/prs')
 }
 
-def uploadArtifact(path) {
-  /* defaults for upload */
-  def domain = 'ams3.digitaloceanspaces.com'
-  def bucket = 'status-im'
-  /* There's so many PR builds we need a separate bucket */
-  if (getBuildType() == 'pr') {
-    bucket = 'status-im-prs'
-  }
-  /* WARNING: s3cmd can't guess APK MIME content-type */
-  def customOpts = ''
-  if (path.endsWith('apk')) {
-    customOpts += "--mime-type='application/vnd.android.package-archive'"
-  }
-  /* We also need credentials for the upload */
-  withCredentials([usernamePassword(
-    credentialsId: 'digital-ocean-access-keys',
-    usernameVariable: 'DO_ACCESS_KEY',
-    passwordVariable: 'DO_SECRET_KEY'
-  )]) {
-    sh """
-      s3cmd \\
-        --acl-public \\
-        ${customOpts} \\
-        --host='${domain}' \\
-        --host-bucket='%(bucket)s.${domain}' \\
-        --access_key=${DO_ACCESS_KEY} \\
-        --secret_key=${DO_SECRET_KEY} \\
-        put ${path} s3://${bucket}/
-    """
-  }
-  return "https://${bucket}.${domain}/${getFilename(path)}"
+def isE2EBuild() {
+  return env.JOB_NAME.contains('e2e')
 }
 
 def getBuildType() {
   def jobName = env.JOB_NAME
-  if (jobName.contains('e2e')) {
+  if (isE2EBuild()) {
       return 'e2e'
   }
-  if (jobName.startsWith('status-react/prs')) {
+  if (isPRBuild()) {
       return 'pr'
   }
   if (jobName.startsWith('status-react/nightly')) {
@@ -189,26 +138,12 @@ def changeId() {
 }
 
 def updateEnv(type) {
-  def envFile = "${env.WORKSPACE}/.env"
+  def envFile = "${env.WORKSPACE}/.env.jenkins"
   /* select .env based on type of build */
-  def selectedEnv = '.env.jenkins'
-  switch (type) {
-    case 'nightly': selectedEnv = '.env.nightly'; break
-    case 'release': selectedEnv = '.env.prod';    break
-    case 'e2e':     selectedEnv = '.env.e2e';     break
+  if (['nightly', 'release', 'e2e'].contains(type)) {
+    envFile = "${env.WORKSPACE}/.env.${type}"
   }
-  sh "cp ${selectedEnv} .env"
-  /* find a list of .env settings to check for them in params */
-  def envContents = readFile(envFile)
-  def envLines = envContents.split()
-  def envVars = envLines.collect { it.split('=').first() }
-  /* for each var available in params modify the .env file */
-  envVars.each { var ->
-    if (params.get(var)) { /* var exists in params and is not empty */
-      println("Changing setting: ${var}=${params.get(var)}")
-      sh "sed -i'.bkp' 's/${var}=.*/${var}=${params.get(var)}/' ${envFile}"
-    }
-  }
+  sh "ln -sf ${envFile} .env"
   /* show contents for debugging purposes */
   sh "cat ${envFile}"
 }

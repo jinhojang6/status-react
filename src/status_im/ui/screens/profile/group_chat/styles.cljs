@@ -6,15 +6,16 @@
    :padding-top      24})
 
 (def action
-  {:background-color (colors/alpha colors/blue 0.1)
+  {:background-color colors/blue-transparent-10
    :border-radius    50})
 
-(def action-label
+; Action label style is expected to be a fn
+(defn action-label [_]
   {:color colors/blue})
 
 (def action-separator
   {:height           1
-   :background-color colors/gray-light
+   :background-color colors/black-transparent
    :margin-left      50})
 
 (def action-icon-opts

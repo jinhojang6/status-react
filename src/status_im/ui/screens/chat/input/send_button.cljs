@@ -9,20 +9,15 @@
 (defn sendable? [input-text disconnected? login-processing?]
   (let [trimmed (string/trim input-text)]
     (not (or (string/blank? trimmed)
-             (= trimmed "/")
              login-processing?
              disconnected?))))
 
-(defview send-button-view []
-  (letsubs [{:keys [command-completion]} [:chats/selected-chat-command]
-            {:keys [input-text seq-arg-input-text]} [:chats/current-chat]
-            disconnected? [:disconnected?]
-            login-processing? [:get-in [:accounts/login :processing]]]
-    (when (and (sendable? input-text disconnected? login-processing?)
-               (or (not command-completion)
-                   (#{:complete :less-than-needed} command-completion)))
+(defview send-button-view [{:keys [input-text]} on-send-press]
+  (letsubs [disconnected? [:disconnected?]
+            {:keys [processing]} [:multiaccounts/login]]
+    (when (sendable? input-text disconnected? processing)
       [react/touchable-highlight
-       {:on-press #(re-frame/dispatch [:chat.ui/send-current-message])}
+       {:on-press on-send-press}
        [vector-icons/icon :main-icons/arrow-up
         {:container-style     style/send-message-container
          :accessibility-label :send-message-button

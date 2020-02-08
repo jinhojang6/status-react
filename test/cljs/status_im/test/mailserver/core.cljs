@@ -1,7 +1,10 @@
 (ns status-im.test.mailserver.core
   (:require [cljs.test :refer-macros [deftest is testing]]
+            [status-im.ethereum.json-rpc :as json-rpc]
             [status-im.transport.utils :as utils]
-            [status-im.mailserver.core :as mailserver]))
+            [status-im.mailserver.core :as mailserver]
+            [status-im.mailserver.constants :as constants]
+            [status-im.utils.random :as rand]))
 
 (def enode "enode://08d8eb6177b187049f6c97ed3f6c74fbbefb94c7ad10bafcaf4b65ce89c314dcfee0a8bc4e7a5b824dfa08b45b360cc78f34f0aff981f8386caa07652d2e601b@163.172.177.138:40404")
 (def enode2 "enode://12d8eb6177b187049f6c97ed3f6c74fbbefb94c7ad10bafcaf4b65ce89c314dcfee0a8bc4e7a5b824dfa08b45b360cc78f34f0aff981f8386caa07652d2e601b@163.172.177.138:40404")
@@ -36,20 +39,18 @@
     (testing "there's a preferred mailserver"
       (testing "it shows the popup"
         (is (:ui/show-confirmation (mailserver/change-mailserver
-                                    {:db {:account/account {:settings
-                                                            {:fleet :beta
-                                                             :mailserver {:beta "id"}}}
+                                    {:db {:multiaccount {:fleet :staging
+                                                         :pinned-mailservers {:staging "id"}}
                                           :peers-count 1}})))))
     (testing "there's not a preferred mailserver"
       (testing "it changes the mailserver"
-        (is (= :a
+        (is (= "mailservers_ping"
                (get-in
                 (mailserver/change-mailserver
-                 {:db {:mailserver/mailservers {:beta {:a "b"}}
-                       :account/account {:settings
-                                         {:fleet :beta}}
+                 {:db {:mailserver/mailservers {:staging {:a "b"}}
+                       :multiaccount {:fleet :staging}
                        :peers-count 1}})
-                [:db :mailserver/current-id]))))
+                [::json-rpc/call 0 :method]))))
       (testing "it does not show the popup"
         (is (not (:ui/show-confirmation (mailserver/change-mailserver
                                          {:db {:peers-count 1}}))))))))
@@ -128,10 +129,10 @@
 
 (deftest edit-mailserver
   (let [db {:mailserver/mailservers
-            {:eth.beta {"a" {:id      "a"
-                             :address valid-enode-address
-                             :password password
-                             :name    "name"}}}}
+            {:eth.staging {"a" {:id      "a"
+                                :address valid-enode-address
+                                :password password
+                                :name    "name"}}}}
         cofx {:db db}]
     (testing "when no id is given"
       (let [actual (mailserver/edit cofx nil)]
@@ -144,7 +145,7 @@
                          :error true}}
                  (-> actual :db :mailserver.edit/mailserver))))
         (testing "it navigates to edit-mailserver view"
-          (is (= :edit-mailserver
+          (is (= [:edit-mailserver nil]
                  (:status-im.ui.screens.navigation/navigate-to actual))))))
     (testing "when an id is given"
       (testing "when the mailserver is in the list"
@@ -158,7 +159,7 @@
                            :error false}}
                    (-> actual :db :mailserver.edit/mailserver))))
           (testing "it navigates to edit-mailserver view"
-            (is (= :edit-mailserver
+            (is (= [:edit-mailserver nil]
                    (:status-im.ui.screens.navigation/navigate-to actual))))))
       (testing "when the mailserver is not in the list"
         (let [actual (mailserver/edit cofx "not-existing")]
@@ -171,104 +172,113 @@
                            :error true}}
                    (-> actual :db :mailserver.edit/mailserver))))
           (testing "it navigates to edit-mailserver view"
-            (is (= :edit-mailserver
+            (is (= [:edit-mailserver nil]
                    (:status-im.ui.screens.navigation/navigate-to actual)))))))))
 
 (deftest connected-mailserver
   (testing "it returns true when set in mailserver/current-id"
-    (let [cofx {:db {:mailserver/current-id "a"}}]
-      (is (mailserver/connected? cofx "a"))))
+    (let [db {:mailserver/current-id "a"}]
+      (is (mailserver/connected? db "a"))))
   (testing "it returns false otherwise"
-    (is (not (mailserver/connected? {:db {}} "a")))))
+    (is (not (mailserver/connected? {} "a")))))
 
 (deftest fetch-mailserver
   (testing "it fetches the mailserver from the db"
-    (let [cofx {:db {:mailserver/mailservers {:eth.beta {"a" {:id      "a"
-                                                              :name    "old-name"
-                                                              :address "enode://old-id:old-password@url:port"}}}}}]
-      (is (mailserver/fetch cofx "a")))))
+    (let [db {:mailserver/mailservers {:eth.staging {"a" {:id      "a"
+                                                          :name    "old-name"
+                                                          :address "enode://old-id:old-password@url:port"}}}}]
+      (is (mailserver/fetch db "a")))))
 
 (deftest fetch-current-mailserver
   (testing "it fetches the mailserver from the db with corresponding id"
-    (let [cofx {:db {:mailserver/current-id "a"
-                     :mailserver/mailservers {:eth.beta {"a" {:id      "a"
-                                                              :name    "old-name"
-                                                              :address "enode://old-id:old-password@url:port"}}}}}]
-      (is (mailserver/fetch-current cofx)))))
+    (let [db {:mailserver/current-id "a"
+              :mailserver/mailservers {:eth.staging {"a" {:id      "a"
+                                                          :name    "old-name"
+                                                          :address "enode://old-id:old-password@url:port"}}}}]
+      (is (mailserver/fetch-current db)))))
 
 (deftest set-current-mailserver
-  (with-redefs [rand-nth (comp last sort)]
-    (let [cofx {:db {:mailserver/mailservers {:eth.beta {"a" {}
-                                                         "b" {}
-                                                         "c" {}
-                                                         "d" {}}}}}]
-      (testing "the user has already a preference"
-        (let [cofx (assoc-in cofx
-                             [:db :account/account :settings]
-                             {:mailserver {:eth.beta "a"}})]
-          (testing "the mailserver exists"
-            (testing "it sets the preferred mailserver"
-              (is (= "a" (-> (mailserver/set-current-mailserver cofx)
-                             :db
-                             :mailserver/current-id)))))
-          (testing "the mailserver does not exists"
-            (let [cofx (update-in cofx [:db :mailserver/mailservers :eth.beta] dissoc "a")]
-              (testing "sets a random mailserver"
-                (is (= "d" (-> (mailserver/set-current-mailserver cofx)
-                               :db
-                               :mailserver/current-id))))))))
-      (testing "the user has not set an explicit preference"
-        (testing "current-id is not set"
-          (testing "it sets a random mailserver"
-            (is (= "d" (-> (mailserver/set-current-mailserver cofx)
+  (let [cofx {:db {:mailserver/mailservers {:eth.staging {"a" {}
+                                                          "b" {}
+                                                          "c" {}
+                                                          "d" {}}}}}]
+    (testing "the user has already a preference"
+      (let [cofx (assoc-in cofx
+                           [:db :multiaccount]
+                           {:pinned-mailservers {:eth.staging "a"}})]
+        (testing "the mailserver exists"
+          (testing "it sets the preferred mailserver"
+            (is (= "a" (-> (mailserver/set-current-mailserver cofx)
                            :db
                            :mailserver/current-id)))))
-        (testing "current-id is set"
-          (testing "it sets the next mailserver"
-            (is (= "c" (-> (mailserver/set-current-mailserver (assoc-in
-                                                               cofx
-                                                               [:db :mailserver/current-id]
-                                                               "b"))
-                           :db
-                           :mailserver/current-id)))
-            (is (= "a" (-> (mailserver/set-current-mailserver (assoc-in
-                                                               cofx
-                                                               [:db :mailserver/current-id]
-                                                               "d"))
-                           :db
-                           :mailserver/current-id)))
-            (is (= "a" (-> (mailserver/set-current-mailserver (assoc-in
-                                                               cofx
-                                                               [:db :mailserver/current-id]
-                                                               "non-existing"))
-                           :db
-                           :mailserver/current-id)))))))))
+        (testing "the mailserver does not exists"
+          (let [cofx (update-in cofx [:db :mailserver/mailservers :eth.staging] dissoc "a")]
+            (testing "look for fastest mailserver"
+              (is (= "mailservers_ping"
+                     (-> (mailserver/set-current-mailserver cofx)
+                         ::json-rpc/call
+                         first
+                         :method))))))))
+    (testing "the user has not set an explicit preference"
+      (testing "current-id is not set"
+        (testing "it looks for fastest mailserver"
+          (is (= "mailservers_ping"
+                 (-> (mailserver/set-current-mailserver cofx)
+                     ::json-rpc/call
+                     first
+                     :method)))))
+      (testing "current-id is set"
+        (testing "it looks for fastest mailserver"
+          (is (= "mailservers_ping"
+                 (-> (mailserver/set-current-mailserver (assoc-in
+                                                         cofx
+                                                         [:db :mailserver/current-id]
+                                                         "b"))
+                     ::json-rpc/call
+                     first
+                     :method)))
+          (is (= "mailservers_ping"
+                 (-> (mailserver/set-current-mailserver (assoc-in
+                                                         cofx
+                                                         [:db :mailserver/current-id]
+                                                         "d"))
+                     ::json-rpc/call
+                     first
+                     :method)))
+          (is (= "mailservers_ping"
+                 (-> (mailserver/set-current-mailserver (assoc-in
+                                                         cofx
+                                                         [:db :mailserver/current-id]
+                                                         "non-existing"))
+                     ::json-rpc/call
+                     first
+                     :method))))))))
 
 (deftest delete-mailserver
   (testing "the user is not connected to the mailserver"
     (let [cofx {:random-id-generator (constantly "random-id")
-                :db {:mailserver/mailservers {:eth.beta {"a" {:id           "a"
-                                                              :name         "old-name"
-                                                              :user-defined true
-                                                              :address      "enode://old-id:old-password@url:port"}}}}}
+                :db {:mailserver/mailservers {:eth.staging {"a" {:id           "a"
+                                                                 :name         "old-name"
+                                                                 :user-defined true
+                                                                 :address      "enode://old-id:old-password@url:port"}}}}}
           actual (mailserver/delete cofx "a")]
       (testing "it removes the mailserver from the list"
-        (is (not (mailserver/fetch actual "a"))))
+        (is (not (mailserver/fetch (:db actual) "a"))))
       (testing "it stores it in the db"
-        (is (= 1 (count (:data-store/tx actual)))))))
+        (is (= 1 (count (::json-rpc/call actual)))))))
   (testing "the mailserver is not user-defined"
     (let [cofx {:random-id-generator (constantly "random-id")
-                :db {:mailserver/mailservers {:eth.beta {"a" {:id      "a"
-                                                              :name    "old-name"
-                                                              :address "enode://old-id:old-password@url:port"}}}}}
+                :db {:mailserver/mailservers {:eth.staging {"a" {:id      "a"
+                                                                 :name    "old-name"
+                                                                 :address "enode://old-id:old-password@url:port"}}}}}
           actual (mailserver/delete cofx "a")]
       (testing "it does not delete the mailserver"
         (is (= {:dispatch [:navigate-back]} actual)))))
   (testing "the user is connected to the mailserver"
     (let [cofx {:random-id-generator (constantly "random-id")
-                :db {:mailserver/mailservers {:eth.beta {"a" {:id      "a"
-                                                              :name    "old-name"
-                                                              :address "enode://old-id:old-password@url:port"}}}}}
+                :db {:mailserver/mailservers {:eth.staging {"a" {:id      "a"
+                                                                 :name    "old-name"
+                                                                 :address "enode://old-id:old-password@url:port"}}}}}
           actual (mailserver/delete cofx "a")]
       (testing "it does not remove the mailserver from the list"
         (is (= {:dispatch [:navigate-back]} actual))))))
@@ -283,54 +293,49 @@
           actual (mailserver/upsert cofx)]
 
       (testing "it adds the enode to mailserver/mailservers"
-        (is (= {:eth.beta {:randomid {:password "test-password"
-                                      :address "enode://test-id@url:port"
-                                      :name "test-name"
-                                      :id :randomid
-                                      :user-defined true}}}
+        (is (= {:eth.staging {:randomid {:password "test-password"
+                                         :address "enode://test-id@url:port"
+                                         :name "test-name"
+                                         :id :randomid
+                                         :user-defined true}}}
                (get-in actual [:db :mailserver/mailservers]))))
       (testing "it navigates back"
         (is (= [:navigate-back]
                (:dispatch actual))))
       (testing "it stores it in the db"
-        (is (= 1 (count (:data-store/tx actual)))))))
+        (is (= 1 (count (::json-rpc/call actual)))))))
   (testing "existing mailserver"
     (let [cofx {:random-id-generator (constantly "random-id")
                 :db {:mailserver.edit/mailserver {:id   {:value  :a}
                                                   :name {:value "new-name"}
                                                   :url  {:value "enode://new-id:new-password@url:port"}}
 
-                     :mailserver/mailservers {:eth.beta {:a {:id      :a
-                                                             :name    "old-name"
-                                                             :address "enode://old-id:old-password@url:port"}}}}}
+                     :mailserver/mailservers {:eth.staging {:a {:id      :a
+                                                                :name    "old-name"
+                                                                :address "enode://old-id:old-password@url:port"}}}}}
           actual (mailserver/upsert cofx)]
       (testing "it navigates back"
         (is (= [:navigate-back]
                (:dispatch actual))))
       (testing "it updates the enode to mailserver/mailservers"
-        (is (= {:eth.beta {:a {:password "new-password"
-                               :address "enode://new-id@url:port"
-                               :name "new-name"
-                               :id :a
-                               :user-defined true}}}
+        (is (= {:eth.staging {:a {:password "new-password"
+                                  :address "enode://new-id@url:port"
+                                  :name "new-name"
+                                  :id :a
+                                  :user-defined true}}}
                (get-in actual [:db :mailserver/mailservers]))))
       (testing "it stores it in the db"
-        (is (= 1 (count (:data-store/tx actual)))))
-      (testing "it logs the user out if connected to the current mailserver"
-        (let [actual (mailserver/upsert (assoc-in cofx
-                                                  [:db :mailserver/current-id] :a))]
-          (is (= [:accounts.logout.ui/logout-confirmed]
-                 (-> actual :data-store/tx first :success-event))))))))
+        (is (= 1 (count (::json-rpc/call actual))))))))
 
 (defn cofx-fixtures [sym-key registered-peer?]
   {:db {:mailserver/state :connected
         :peers-summary (if registered-peer?
                          [{:id "mailserver-id" :enode "enode://mailserver-id@ip"}]
                          [])
-        :account/account {:settings {:fleet :eth.beta}}
+        :multiaccount {:fleet :eth.staging}
         :mailserver/current-id "mailserver-a"
-        :mailserver/mailservers {:eth.beta {"mailserver-a" {:sym-key-id sym-key
-                                                            :address "enode://mailserver-id@ip"}}}}})
+        :mailserver/mailservers {:eth.staging {"mailserver-a" {:sym-key-id sym-key
+                                                               :address "enode://mailserver-id@ip"}}}}})
 
 (defn peers-summary-change-result [sym-key registered-peer? registered-peer-before?]
   (mailserver/peers-summary-change (cofx-fixtures sym-key
@@ -345,12 +350,14 @@
   (testing "there's a current request"
     (testing "it reached the maximum number of attempts"
       (testing "it changes mailserver"
-        (is (= :connecting
-               (get-in (mailserver/resend-request
-                        {:db {:mailserver/current-request
-                              {:attempts mailserver/maximum-number-of-attempts}}}
-                        {})
-                       [:db :mailserver/state])))))
+        (is (= "mailservers_ping"
+               (-> (mailserver/resend-request
+                    {:db {:mailserver/current-request
+                          {:attempts constants/maximum-number-of-attempts}}}
+                    {})
+                   ::json-rpc/call
+                   first
+                   :method)))))
     (testing "it did not reach the maximum number of attempts"
       (testing "it reached the maximum number of attempts"
         (testing "it decrease the limit")
@@ -377,7 +384,7 @@
 
 (def cofx-no-pub-topic
   {:db
-   {:account/account {:public-key "me"}
+   {:multiaccount {:public-key "me"}
     :chats
     {"chat-id-1" {:is-active                      true
                   :messages                       {}
@@ -393,7 +400,7 @@
 
 (def cofx-single-pub-topic
   {:db
-   {:account/account {:public-key "me"}
+   {:multiaccount {:public-key "me"}
     :chats
     {"chat-id-1" {:is-active                      true
                   :messages                       {}
@@ -410,7 +417,7 @@
 
 (def cofx-multiple-pub-topic
   {:db
-   {:account/account {:public-key "me"}
+   {:multiaccount {:public-key "me"}
     :chats
     {"chat-id-1" {:is-active                      true
                   :messages                       {}
@@ -564,13 +571,13 @@
   (testing "Mailserver disconnected, sym-key exists"
     (let [result (peers-summary-change-result true false true)]
       (is (= (into #{} (keys result))
-             #{:db :mailserver/add-peer :utils/dispatch-later :mailserver/update-mailservers}))
+             #{:db :mailserver/add-peer :mailserver/update-mailservers}))
       (is (= (get-in result [:db :mailserver/state])
              :connecting))))
   (testing "Mailserver disconnected, sym-key doesn't exists (unlikely situation in practice)"
     (let [result (peers-summary-change-result false false true)]
       (is (= (into #{} (keys result))
-             #{:db :mailserver/add-peer :utils/dispatch-later  :shh/generate-sym-key-from-password :mailserver/update-mailservers}))
+             #{:db :mailserver/add-peer :shh/generate-sym-key-from-password :mailserver/update-mailservers}))
       (is (= (get-in result [:db :mailserver/state])
              :connecting))))
   (testing "Mailserver isn't concerned by peer summary changes"
@@ -583,34 +590,34 @@
   (testing "it removes the preference"
     (let [db {:mailserver/current-id "mailserverid"
               :mailserver/mailservers
-              {:eth.beta {"mailserverid" {:address  "mailserver-address"
-                                          :password "mailserver-password"}}}
-              :account/account
-              {:settings {:fleet :eth.beta
-                          :mailserver {:eth.beta "mailserverid"}}}}]
+              {:eth.staging {"mailserverid" {:address  "mailserver-address"
+                                             :password "mailserver-password"}}}
+              :multiaccount
+              {:fleet :eth.staging
+               :pinned-mailservers {:eth.staging "mailserverid"}}}]
       (is (not (get-in (mailserver/unpin {:db db})
-                       [:db :account/account :settings :mailserver :eth.beta]))))))
+                       [:db :multiaccount :pinned-mailservers :eth.staging]))))))
 
 (deftest pin-test
   (testing "it removes the preference"
     (let [db {:mailserver/current-id "mailserverid"
               :mailserver/mailservers
-              {:eth.beta {"mailserverid" {:address  "mailserver-address"
-                                          :password "mailserver-password"}}}
-              :account/account
-              {:settings {:fleet :eth.beta
-                          :mailserver {}}}}]
+              {:eth.staging {"mailserverid" {:address  "mailserver-address"
+                                             :password "mailserver-password"}}}
+              :multiaccount
+              {:fleet :eth.staging
+               :pinned-mailservers {}}}]
       (is (= "mailserverid" (get-in (mailserver/pin {:db db})
-                                    [:db :account/account :settings :mailserver :eth.beta]))))))
+                                    [:db :multiaccount :pinned-mailservers :eth.staging]))))))
 
 (deftest connect-to-mailserver
   (let [db {:mailserver/current-id "mailserverid"
             :mailserver/mailservers
-            {:eth.beta {"mailserverid" {:address  "mailserver-address"
-                                        :password "mailserver-password"}}}
-            :account/account
-            {:settings {:fleet :eth.beta
-                        :mailserver {:eth.beta "mailserverid"}}}}]
+            {:eth.staging {"mailserverid" {:address  "mailserver-address"
+                                           :password "mailserver-password"}}}
+            :multiaccount
+            {:fleet :eth.staging
+             :pinned-mailservers {:eth.staging "mailserverid"}}}]
     (testing "it adds the peer"
       (is (= "mailserver-address"
              (:mailserver/add-peer (mailserver/connect-to-mailserver {:db db})))))
@@ -621,193 +628,251 @@
                  first
                  :password))))
     (let [mailserver-with-sym-key-db (assoc-in db
-                                               [:mailserver/mailservers :eth.beta "mailserverid" :sym-key-id]
+                                               [:mailserver/mailservers :eth.staging "mailserverid" :sym-key-id]
                                                "somesymkeyid")]
       (testing "it does not generate a sym key if already present"
         (is (not (-> (mailserver/connect-to-mailserver {:db mailserver-with-sym-key-db})
                      :shh/generate-sym-key-from-password
                      first)))))))
 
-(deftest calculate-gap
-  (testing "new topic"
-    (is (= {:gap-from     10
-            :gap-to       10
-            :last-request 10}
+(deftest check-existing-gaps
+  (let []
+    (testing "no gaps"
+      (is (= {}
+             (mailserver/check-existing-gaps
+              :chat-id
+              nil
+              {:from 1
+               :to   2}))))
+    (testing "request before gaps"
+      (is (= {}
+             (mailserver/check-existing-gaps
+              :chat-id
+              {:g1 {:from 10
+                    :to   20
+                    :id   :g1}
+               :g2 {:from 30
+                    :to   40
+                    :id   :g2}
+               :g3 {:from 50
+                    :to   60
+                    :id   :g3}}
+              {:from 1
+               :to   2}))))
+    (testing "request between gaps"
+      (is (= {}
+             (mailserver/check-existing-gaps
+              :chat-id
+              {:g1 {:from 10
+                    :to   20
+                    :id   :g1}
+               :g2 {:from 30
+                    :to   40
+                    :id   :g2}
+               :g3 {:from 50
+                    :to   60
+                    :id   :g3}}
+              {:from 22
+               :to   28}))))
+    (testing "request between gaps"
+      (is (= {}
+             (mailserver/check-existing-gaps
+              :chat-id
+              {:g1 {:from 10
+                    :to   20
+                    :id   :g1}
+               :g2 {:from 30
+                    :to   40
+                    :id   :g2}
+               :g3 {:from 50
+                    :to   60
+                    :id   :g3}}
+              {:from 22
+               :to   28}))))
+    (testing "request after gaps"
+      (is (= {}
+             (mailserver/check-existing-gaps
+              :chat-id
+              {:g1 {:from 10
+                    :to   20
+                    :id   :g1}
+               :g2 {:from 30
+                    :to   40
+                    :id   :g2}
+               :g3 {:from 50
+                    :to   60
+                    :id   :g3}}
+              {:from 70
+               :to   80}))))
+    (testing "request covers all gaps"
+      (is (= {:deleted-gaps [:g3 :g2 :g1]}
+             (mailserver/check-existing-gaps
+              :chat-id
+              {:g1 {:from 10
+                    :to   20
+                    :id   :g1}
+               :g2 {:from 30
+                    :to   40
+                    :id   :g2}
+               :g3 {:from 50
+                    :to   60
+                    :id   :g3}}
+              {:from 10
+               :to   60}))))
+    (testing "request splits gap in two"
+      (is (= {:deleted-gaps [:g1]
+              :new-gaps     [{:chat-id :chat-id :from 10 :to 12}
+                             {:chat-id :chat-id :from 18 :to 20}]}
+             (mailserver/check-existing-gaps
+              :chat-id
+              {:g1 {:from 10
+                    :to   20
+                    :id   :g1}
+               :g2 {:from 30
+                    :to   40
+                    :id   :g2}
+               :g3 {:from 50
+                    :to   60
+                    :id   :g3}}
+              {:from 12
+               :to   18}))))
+    (testing "request partially covers one gap #1"
+      (is (= {:updated-gaps {:g1 {:from 15
+                                  :to   20
+                                  :id   :g1}}}
+             (mailserver/check-existing-gaps
+              :chat-id
+              {:g1 {:from 10
+                    :to   20
+                    :id   :g1}
+               :g2 {:from 30
+                    :to   40
+                    :id   :g2}
+               :g3 {:from 50
+                    :to   60
+                    :id   :g3}}
+              {:from 8
+               :to   15}))))
+    (testing "request partially covers one gap #2"
+      (is (= {:updated-gaps {:g1 {:from 10
+                                  :to   15
+                                  :id   :g1}}}
+             (mailserver/check-existing-gaps
+              :chat-id
+              {:g1 {:from 10
+                    :to   20
+                    :id   :g1}
+               :g2 {:from 30
+                    :to   40
+                    :id   :g2}
+               :g3 {:from 50
+                    :to   60
+                    :id   :g3}}
+              {:from 15
+               :to   25}))))
+    (testing "request partially covers two gaps #2"
+      (is (= {:updated-gaps {:g1 {:from 10
+                                  :to   15
+                                  :id   :g1}
+                             :g2 {:from 35
+                                  :to   40
+                                  :id   :g2}}}
+             (mailserver/check-existing-gaps
+              :chat-id
+              {:g1 {:from 10
+                    :to   20
+                    :id   :g1}
+               :g2 {:from 30
+                    :to   40
+                    :id   :g2}
+               :g3 {:from 50
+                    :to   60
+                    :id   :g3}}
+              {:from 15
+               :to   35}))))
+    (testing "request covers one gap and two other partially"
+      (is (= {:updated-gaps {:g1 {:from 10
+                                  :to   15
+                                  :id   :g1}
+                             :g3 {:from 55
+                                  :to   60
+                                  :id   :g3}}
+              :deleted-gaps [:g2]}
+             (mailserver/check-existing-gaps
+              :chat-id
+              {:g1 {:from 10
+                    :to   20
+                    :id   :g1}
+               :g2 {:from 30
+                    :to   40
+                    :id   :g2}
+               :g3 {:from 50
+                    :to   60
+                    :id   :g3}}
+              {:from 15
+               :to   55}))))))
 
-           (mailserver/calculate-gap
-            {:gap-from     nil
-             :gap-to       nil
-             :last-request nil}
-            {:request-from 5
-             :request-to   10}))))
-  (testing "calculate-gap#1"
-    (is (= {:gap-from     3
-            :gap-to       4
-            :last-request 5}
+(defn rand-guid []
+  (let [gap-id (atom 0)]
+    (fn []
+      (swap! gap-id inc)
+      (str "gap" @gap-id))))
 
-           (mailserver/calculate-gap
-            {:gap-from     1
-             :gap-to       2
-             :last-request 3}
-            {:request-from 4
-             :request-to   5}))))
-  (testing "calculate-gap#2"
-    (is (= {:gap-from     1
-            :gap-to       2
-            :last-request 5}
-           (mailserver/calculate-gap
-            {:gap-from     1
-             :gap-to       2
-             :last-request 4}
-            {:request-from 3
-             :request-to   5}))))
-  (testing "calculate-gap#2-1"
-    (is (= {:gap-from     1
-            :gap-to       2
-            :last-request 4}
-           (mailserver/calculate-gap
-            {:gap-from     1
-             :gap-to       2
-             :last-request 3}
-            {:request-from 3
-             :request-to   4}))))
-  (testing "calculate-gap#3"
-    (is (= {:gap-from     1
-            :gap-to       2
-            :last-request 5}
-           (mailserver/calculate-gap
-            {:gap-from     1
-             :gap-to       2
-             :last-request 5}
-            {:request-from 3
-             :request-to   4}))))
-  (testing "calculate-gap#3-1"
-    (is (= {:gap-from     1
-            :gap-to       2
-            :last-request 3}
-           (mailserver/calculate-gap
-            {:gap-from     1
-             :gap-to       2
-             :last-request 3}
-            {:request-from 2
-             :request-to   3}))))
-  (testing "calculate-gap#4"
-    (is (= {:gap-from     1
-            :gap-to       2
-            :last-request 5}
-           (mailserver/calculate-gap
-            {:gap-from     1
-             :gap-to       2
-             :last-request 5}
-            {:request-from 3
-             :request-to   4}))))
-  (testing "calculate-gap#5"
-    (is (= {:gap-from     1
-            :gap-to       4
-            :last-request 5}
-           (mailserver/calculate-gap
-            {:gap-from     1
-             :gap-to       4
-             :last-request 5}
-            {:request-from 2
-             :request-to   3}))))
-  (testing "calculate-gap#6"
-    (is (= {:gap-from     2
-            :gap-to       3
-            :last-request 4}
-           (mailserver/calculate-gap
-            {:gap-from     2
-             :gap-to       3
-             :last-request 4}
-            {:request-from 1
-             :request-to   2}))))
-  (testing "calculate-gap#6-1"
-    (is (= {:gap-from     1
-            :gap-to       4
-            :last-request 5}
-           (mailserver/calculate-gap
-            {:gap-from     1
-             :gap-to       4
-             :last-request 5}
-            {:request-from 2
-             :request-to   3}))))
-  (testing "calculate-gap#0"
-    (is (= {:gap-from     2
-            :gap-to       3
-            :last-request 3}
-           (mailserver/calculate-gap
-            {:gap-from     3
-             :gap-to       3
-             :last-request 3}
-            {:request-from 1
-             :request-to   2}))))
-  (testing "calculate-gap#7"
-    (is (= {:gap-from     3
-            :gap-to       4
-            :last-request 5}
-           (mailserver/calculate-gap
-            {:gap-from     3
-             :gap-to       4
-             :last-request 5}
-            {:request-from 1
-             :request-to   2}))))
-  (testing "calculate-gap#8"
-    (is (= {:gap-from     5
-            :gap-to       5
-            :last-request 5}
-           (mailserver/calculate-gap
-            {:gap-from     2
-             :gap-to       3
-             :last-request 5}
-            {:request-from 1
-             :request-to   4}))))
-  (testing "calculate-gap#8-1"
-    (is (= {:gap-from     3
-            :gap-to       3
-            :last-request 3}
-           (mailserver/calculate-gap
-            {:gap-from     1
-             :gap-to       2
-             :last-request 3}
-            {:request-from 1
-             :request-to   2}))))
-  (testing "calculate-gap#9"
-    (is (= {:gap-from     5
-            :gap-to       5
-            :last-request 5}
-           (mailserver/calculate-gap
-            {:gap-from     2
-             :gap-to       3
-             :last-request 4}
-            {:request-from 1
-             :request-to   5}))))
-  (testing "calculate-gap#9-1"
-    (is (= {:gap-from     3
-            :gap-to       3
-            :last-request 3}
-           (mailserver/calculate-gap
-            {:gap-from     1
-             :gap-to       2
-             :last-request 3}
-            {:request-from 1
-             :request-to   3}))))
-  (testing "calculate-gap#10"
-    (is (= {:gap-from     1
-            :gap-to       2
-            :last-request 5}
-           (mailserver/calculate-gap
-            {:gap-from     1
-             :gap-to       3
-             :last-request 4}
-            {:request-from 2
-             :request-to   5}))))
-  (testing "calculate-gap#10-1"
-    (is (= {:gap-from     1
-            :gap-to       2
-            :last-request 3}
-           (mailserver/calculate-gap
-            {:gap-from     1
-             :gap-to       2
-             :last-request 3}
-            {:request-from 2
-             :request-to   3})))))
+(deftest prepare-new-gaps
+  (testing "prepare-new-gaps"
+    (with-redefs [rand/guid (rand-guid)]
+      (is (= {"chat1" {"gap1" {:id      "gap1"
+                               :chat-id "chat1"
+                               :from    20
+                               :to      30}}}
+             (mailserver/prepare-new-gaps
+              nil
+              {"chat1"
+               {:chat-id             "chat1"
+                :lowest-request-from 10
+                :highest-request-to  20}}
+              {:from 30
+               :to   50}
+              #{"chat1"})))))
+  (testing "prepare-new-gaps request after known range"
+    (with-redefs [rand/guid (rand-guid)]
+      (is (= {"chat1" {"gap1" {:id      "gap1"
+                               :chat-id "chat1"
+                               :from    12
+                               :to      14}
+                       "gap2" {:chat-id "chat1"
+                               :from    20
+                               :to      30
+                               :id      "gap2"}}}
+             (mailserver/prepare-new-gaps
+              {"chat1" [{:chat-id "chat1"
+                         :from    12
+                         :to      14}]}
+              {"chat1"
+               {:chat-id             "chat1"
+                :lowest-request-from 10
+                :highest-request-to  20}}
+              {:from 30
+               :to   50}
+              #{"chat1"})))))
+  (testing "prepare-new-gaps request before known range"
+    (with-redefs [rand/guid (rand-guid)]
+      (is (= {"chat1" {"gap1" {:chat-id "chat1"
+                               :from    12
+                               :to      14
+                               :id      "gap1"}
+                       "gap2" {:chat-id "chat1"
+                               :from    8
+                               :to      10
+                               :id      "gap2"}}}
+             (mailserver/prepare-new-gaps
+              {"chat1" [{:chat-id "chat1"
+                         :from    12
+                         :to      14}]}
+              {"chat1"
+               {:chat-id             "chat1"
+                :lowest-request-from 10
+                :highest-request-to  20}}
+              {:from 2
+               :to   8}
+              #{"chat1"}))))))

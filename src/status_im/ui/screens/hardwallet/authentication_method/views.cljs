@@ -6,10 +6,10 @@
             [status-im.ui.components.toolbar.view :as toolbar]
             [status-im.ui.components.styles :as components.styles]
             [status-im.ui.components.common.common :as common]
-            [status-im.ui.components.status-bar.view :as status-bar]
             [status-im.i18n :as i18n]
             [status-im.ui.components.colors :as colors]
-            [status-im.react-native.resources :as resources]))
+            [status-im.react-native.resources :as resources]
+            [status-im.ui.components.topbar :as topbar]))
 
 (defn authentication-method-row [{:keys [title on-press icon]}]
   [react/touchable-highlight {:on-press on-press}
@@ -24,15 +24,12 @@
 
 (defn hardwallet-authentication-method []
   [react/view styles/container
-   [status-bar/status-bar]
    [react/view components.styles/flex
-    [toolbar/toolbar {}
-     toolbar/default-nav-back
-     nil]
+    [topbar/topbar]
     [common/separator]
     [react/view styles/choose-authentication-method
      [react/view styles/lock-image-container
-      [react/image {:source (:keycard-lock resources/ui)
+      [react/image {:source (resources/get-image :keycard-lock)
                     :style  styles/lock-image}]]
      [react/text {:style           styles/choose-authentication-method-text
                   :number-of-lines 3}
@@ -40,7 +37,7 @@
     [react/view styles/authentication-methods
      [authentication-method-row {:title    (i18n/label :t/keycard)
                                  :icon     :main-icons/keycard
-                                 :on-press #(re-frame/dispatch [:hardwallet.ui/status-hardwallet-option-pressed])}]
+                                 :on-press #(re-frame/dispatch [:onboarding.ui/keycard-option-pressed])}]
      [authentication-method-row {:title    (i18n/label :t/password)
                                  :icon     :main-icons/password
                                  :on-press #(re-frame/dispatch [:hardwallet.ui/password-option-pressed])}]]]])

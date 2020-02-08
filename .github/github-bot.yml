@@ -2,15 +2,16 @@ _extends: probot-settings
 
 project-board:
   name: 'Pipeline for QA'
+  min-reviewers: 1
   tested-pr-label-name: 'Tested - Issues'
   contributor-column-name: 'CONTRIBUTOR'
   review-column-name: 'REVIEW'
-  test-column-name: 'TO TEST'
+  test-column-name: 'E2E Tests'
 
 automated-tests:
   repo-full-name: 'status-im/status-react'
-  job-full-name: 'end-to-end-tests/status-app-end-to-end-tests'
-  kickoff-column-name: 'REVIEW'
+  job-full-name: 'end-to-end-tests/status-app-prs'
+  kickoff-column-name: 'E2E Tests'
 
 github-team:
   slug: 'clojure'
@@ -18,20 +19,11 @@ github-team:
 prchecklist:
   title: Pull Request Checklist
   checklist:
-    - 'Have you updated the documentation, if impacted (e.g. [docs.status.im](https://docs.status.im/docs/build_status.html))?'
-
-stale:
-  daysUntilStale: 90
-  daysUntilPullRequestStale: 14
-  daysUntilClose: 7
-  exemptLabels:
-    - 'wall of shame'
-    - security
-  staleLabel: stale
-  markComment: >
-    This issue has been automatically marked as stale because it has not had
-    recent activity. It will be closed if no further activity occurs. Thank you
-    for your contributions.
-  closeComment: >
-    This issue has been automatically closed. Please re-open if this issue
-    is important to you.
+    - '**Docs**: Updated the [documentation](https://status.im/build_status/), if affected'
+    - '**Docs**: Added or updated inline comments explaining intention of the code'
+    - '**Tests**: Ensured that all new UI elements have been assigned accessibility IDs'
+    - '**Tests**: Signaled need for E2E tests with label, if applicable'
+    - '**Tests**: Briefly described what was tested and what platforms were used'
+    - '**UI**: In case of UI changes, ensured that UI matches [Figma](https://www.figma.com/)'
+    - '**UI**: In case of UI changes, requested review from a Core UI designer'
+    - '**UI**: In case of UI changes, included screenshots of implementation'

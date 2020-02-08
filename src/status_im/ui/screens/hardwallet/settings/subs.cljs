@@ -6,7 +6,7 @@
 (re-frame/reg-sub
  :keycard-paired-on
  (fn [db]
-   (some-> (get-in db [:account/account :keycard-paired-on])
+   (some-> (get-in db [:multiaccount :keycard-paired-on])
            (utils.datetime/timestamp->year-month-day-date))))
 
 (re-frame/reg-sub
@@ -15,9 +15,9 @@
    (core/get-pairing db)))
 
 (re-frame/reg-sub
- :keycard-account-pairing
+ :keycard-multiaccount-pairing
  (fn [db]
-   (get-in db [:account/account :keycard-pairing])))
+   (get-in db [:multiaccount :keycard-pairing])))
 
 (re-frame/reg-sub
  :hardwallet/pin-retry-counter
@@ -30,12 +30,19 @@
    (get-in db [:hardwallet :application-info :puk-retry-counter])))
 
 (re-frame/reg-sub
+ :hardwallet/retry-counter
+ :<- [:hardwallet/pin-retry-counter]
+ :<- [:hardwallet/puk-retry-counter]
+ (fn [[pin puk]]
+   (if (zero? pin) puk pin)))
+
+(re-frame/reg-sub
  :keycard-reset-card-disabled?
  (fn [db]
    (get-in db [:hardwallet :reset-card :disabled?] false)))
 
 (re-frame/reg-sub
- :keycard-account?
+ :keycard-multiaccount?
  (fn [db]
    (boolean
-    (get-in db [:account/account :keycard-instance-uid]))))
+    (get-in db [:multiaccount :keycard-pairing]))))

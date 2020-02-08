@@ -1,21 +1,23 @@
-{ stdenv, pkgs }:
+{ stdenv, mkShell, conan, nsis, go, baseImageFactory }:
 
-with pkgs;
-with stdenv;
+assert stdenv.isLinux;
 
 let
-  baseImage = callPackage ./base-image { };
+  baseImage = baseImageFactory "windows";
 
-in
-{
-  buildInputs = lib.optionals isLinux [
+in rec {
+  buildInputs = stdenv.lib.optionals stdenv.isLinux [
     conan
     nsis
     baseImage
     go # Needed for Windows build only
   ];
 
-  shellHook = ''
-    export STATUSREACT_WINDOWS_BASEIMAGE_PATH="${baseImage}/src"
-  '';
+  shell = mkShell {
+    inherit buildInputs;
+    shellHook = ''
+      ${baseImage.shellHook}
+      unset QT_PATH
+    '';
+  };
 }

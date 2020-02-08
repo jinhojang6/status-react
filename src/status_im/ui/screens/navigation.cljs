@@ -5,29 +5,6 @@
             [taoensso.timbre :as log]
             [status-im.utils.fx :as fx]))
 
-;; private helper fns
-
-(defn- push-view [db view-id]
-  (-> db
-      (update :navigation-stack conj view-id)
-      (assoc :view-id view-id)))
-
-;; public fns
-
-(fx/defn navigate-to-clean
-  [{:keys [db]} view-id screen-params]
-  (log/debug "current view-id " (:view-id db)
-             "changing to " view-id)
-  (let [db (cond-> db
-             (seq screen-params)
-             (assoc-in [:navigation/screen-params view-id] screen-params))]
-    {:db                 (push-view db view-id)
-     ::navigate-to-clean view-id}))
-
-(fx/defn navigate-forget
-  [{:keys [db]} view-id]
-  {:db (assoc db :view-id view-id)})
-
 (defmulti unload-data!
   (fn [db] (:view-id db)))
 
@@ -40,7 +17,7 @@
 
 (defn- -preload-data! [{:keys [was-modal?] :as db} & args]
   (if was-modal?
-    (dissoc db :was-modal?) ;;TODO check how it worked with this bug
+    (dissoc db :was-modal?)
     (apply preload-data! db args)))
 
 (fx/defn navigate-to-cofx
@@ -52,14 +29,21 @@
                             screen-params))]
     {:db           (if (= view-id go-to-view-id)
                      db
-                     (push-view db go-to-view-id))
-     ::navigate-to go-to-view-id}))
+                     (-> db
+                         (update :navigation-stack conj go-to-view-id)
+                         (assoc :view-id go-to-view-id)))
+     ::navigate-to [go-to-view-id screen-params]}))
 
 (fx/defn navigate-reset
   [{:keys [db]} {:keys [index actions] :as config}]
-  {:db              (assoc db :view-id
-                           (:routeName (get actions index)))
-   ::navigate-reset config})
+  (let [stack (into '() (map :routeName actions))
+        view-id (get stack index)]
+    {:db              (assoc db
+                             :view-id view-id
+                             ;;NOTE: stricly needs to be a list
+                             ;;because navigate-back pops it
+                             :navigation-stack stack)
+     ::navigate-reset config}))
 
 (def unload-data-interceptor
   (re-frame/->interceptor
@@ -72,13 +56,11 @@
 (def navigation-interceptors
   [unload-data-interceptor (re-frame/enrich preload-data!)])
 
-;; effects
-
 (re-frame/reg-fx
  ::navigate-to
- (fn [view-id]
-   (log/debug :navigate-to view-id)
-   (navigation/navigate-to (name view-id))))
+ (fn [[view-id params]]
+   (log/debug :navigate-to view-id params)
+   (navigation/navigate-to (name view-id) params)))
 
 (re-frame/reg-fx
  ::navigate-back
@@ -91,16 +73,6 @@
  (fn [config]
    (log/debug :navigate-reset config)
    (navigation/navigate-reset config)))
-
-(re-frame/reg-fx
- ::navigate-to-clean
- (fn [view-id]
-   (log/debug :navigate-to-clean view-id)
-   (navigation/navigate-reset
-    {:index   0
-     :actions [{:routeName view-id}]})))
-
-;; event handlers
 
 (handlers/register-handler-fx
  :navigate-to
@@ -116,15 +88,14 @@
 
 (fx/defn navigate-back
   [{{:keys [navigation-stack view-id] :as db} :db}]
-  (assoc
-   {::navigate-back nil}
+  {::navigate-back nil
    :db (let [[previous-view-id :as navigation-stack'] (pop navigation-stack)
              first-in-stack (first navigation-stack)]
          (if (= view-id first-in-stack)
            (-> db
                (assoc :view-id previous-view-id)
                (assoc :navigation-stack navigation-stack'))
-           (assoc db :view-id first-in-stack)))))
+           (assoc db :view-id first-in-stack)))})
 
 (handlers/register-handler-fx
  :navigate-back
@@ -133,9 +104,15 @@
    (navigate-back cofx)))
 
 (handlers/register-handler-fx
+ :navigate-reset
+ (fn [cofx [_ view-id]]
+   (navigate-reset cofx {:index   0
+                         :actions [{:routeName view-id}]})))
+
+(handlers/register-handler-fx
  :navigate-to-clean
  (fn [cofx [_ view-id params]]
-   (navigate-to-clean cofx view-id params)))
+   (navigate-to-cofx cofx view-id params)))
 
 (handlers/register-handler-fx
  :navigate-to-tab

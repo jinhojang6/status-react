@@ -3,12 +3,13 @@
 ########################################################################
 # This install script will setup your development dependencies on OS X
 # or Ubuntu. Ubuntu 18.04 is the only tested version.
+# It is not required or supported in NixOS.
 #
 # Usage: scripts/setup
 ########################################################################
 
-_current_dir=$(cd "${BASH_SOURCE%/*}" && pwd)
-source "$_current_dir/lib/setup/path-support.sh"
+GIT_ROOT=$(cd "${BASH_SOURCE%/*}" && git rev-parse --show-toplevel)
+source "$GIT_ROOT/scripts/lib/setup/path-support.sh"
 
 source_lib "output.sh"
 source_lib "packages.sh"
@@ -19,35 +20,23 @@ exit_unless_os_supported
 ####
 setup_header "Checking prerequisites..."
 
-if ! program_exists "curl"; then
+_need_curl=0
+! is_nixos && ! program_exists nix && _need_curl=1
+
+if [ $_need_curl -eq 1 ] && ! program_exists "curl"; then
   cecho "@b@yellow[[Please install curl before running setup.]]"
   exit 1
 fi
 
-if is_linux && [ -z "$CI_ENVIRONMENT" ]; then
-  watches=$(cat /proc/sys/fs/inotify/max_user_watches)
-  required_watches=524288
-  if [ $watches -lt $required_watches ]; then
-    cecho "@b@cyan[[fs.inotify.max_user_watches limit is too low ($watches), increasing it]]"
-    echo fs.inotify.max_user_watches=$required_watches | sudo tee -a /etc/sysctl.conf
-    sudo sysctl -p
-  fi
-
-  if [ -f "/etc/arch-release" ]; then
-    # Arch Linux
-    userns=$(sysctl -n kernel.unprivileged_userns_clone)
-    if [ "$userns" != '1' ]; then
-      sudo sysctl kernel.unprivileged_userns_clone=1
-    fi
-  fi
-fi
+# bump max watches limit to avoid issues with RN builds
+$GIT_ROOT/scripts/inotify_fix.sh
 
 ####
 setup_header "Installing requirements..."
 
-if ! program_exists nix; then
-  required_version=$(toolversion nix)
-  NIX_INSTALLER_NO_MODIFY_PROFILE=1 bash <(curl https://nixos.org/releases/nix/nix-${required_version}/install) --no-daemon
+if [ "$IN_NIX_SHELL" != 'pure' ] && ! is_nixos && ! program_exists nix; then
+  required_version="2.3.2"
+  NIX_INSTALLER_NO_MODIFY_PROFILE=1 NIX_IGNORE_SYMLINK_STORE=1 bash <(curl https://nixos.org/releases/nix/nix-${required_version}/install) --no-daemon
   if [ $? -eq 0 ]; then
     echo -e "${YELLOW}**********************************************************************************************************"
     echo "The Nix package manager was successfully installed."

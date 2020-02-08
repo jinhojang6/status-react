@@ -7,20 +7,23 @@
 }:
 
 let
+  owner = "AppImage";
+  repo = "AppImageKit";
+  rev = "b0859501df61cde198b54a317c03b41dbafc98b1";
+  sha256 = "0qqg79jw9w9rs8c2w3lla4kz62ihafrf7jm370pp1dl8y2i81jzg";
 
   appimagekit_src = fetchFromGitHub {
-    owner = "AppImage";
-    repo = "AppImageKit";
-    rev = "b0859501df61cde198b54a317c03b41dbafc98b1";
-    sha256 = "0qqg79jw9w9rs8c2w3lla4kz62ihafrf7jm370pp1dl8y2i81jzg";
+    name = "${repo}-${stdenv.lib.strings.substring 0 7 rev}-source";
+    inherit owner repo rev sha256;
   };
 
   # squashfuse adapted to nix from cmake experession in "${appimagekit_src}/cmake/dependencies.cmake"
   appimagekit_squashfuse = squashfuse.overrideAttrs (attrs: rec {
-    name = "squashfuse-${version}";
+    pname = "squashfuse";
     version = "20161009";
 
     src = fetchFromGitHub {
+      name = "squashfuse-source";
       owner = "vasi";
       repo  = "squashfuse";
       rev   = "1f980303b89c779eabfd0a0fdd36d6a7a311bf92";
@@ -58,7 +61,8 @@ let
   });
 
 in stdenv.mkDerivation rec {
-  name = "appimagekit-20180727";
+  pname = "appimagekit";
+  version = "20180727";
 
   src = appimagekit_src;
 

@@ -1,6 +1,6 @@
 (ns status-im.ui.components.list.styles
-  (:require-macros [status-im.utils.styles :refer [defstyle]])
-  (:require [status-im.ui.components.colors :as colors]))
+  (:require [status-im.ui.components.colors :as colors]
+            [status-im.utils.styles :as styles]))
 
 (def item
   {:flex-direction     :row
@@ -43,8 +43,8 @@
   {:width         image-size
    :height        image-size
    :margin-right  16
-   :border-radius 40
-   :border-color  (colors/alpha colors/gray 0.1)
+   :border-radius (/ image-size 2)
+   :border-color  colors/gray-transparent-10
    :border-width  1})
 
 (def icon-size 24)
@@ -75,14 +75,13 @@
 (def settings-item-separator
   {:margin-left 16})
 
-(defn settings-item
-  [large?]
-  {:padding-left       16
-   :padding-right      8
-   :flex               1
-   :flex-direction     :row
-   :align-items        :center
-   :height             (if large? 82 52)})
+(def settings-item
+  {:padding-left   16
+   :padding-right  8
+   :flex           1
+   :flex-direction :row
+   :align-items    :center
+   :height         64})
 
 (defn settings-item-icon
   [icon-color large?]
@@ -111,7 +110,6 @@
 
 (def settings-item-main-text-container
   {:flex-direction :row
-   :height         18
    :align-items    :center})
 
 (def settings-item-subtext
@@ -141,18 +139,18 @@
 
 (def base-separator
   {:height           1
-   :background-color colors/gray-light})
+   :background-color colors/black-transparent})
 
 (def separator
   (merge
    base-separator
    {:margin-left 64}))
 
-(defstyle list-header-footer-spacing
+(styles/def list-header-footer-spacing
   {:android {:background-color colors/white
              :height           8}})
 
-(defstyle section-header
+(styles/def section-header
   {:font-size       14
    :color           colors/gray
    :margin-left     16
@@ -166,7 +164,7 @@
   {:background-color colors/blue})
 
 (def action
-  {:background-color colors/white-light-transparent
+  {:background-color colors/white-transparent-10
    :border-radius    50})
 
 (def action-disabled
@@ -180,7 +178,7 @@
 
 (def action-separator
   {:height           1
-   :background-color colors/white-light-transparent
+   :background-color colors/white-transparent-10
    :margin-left      64})
 
 (def list-with-label-wrapper

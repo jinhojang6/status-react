@@ -1,18 +1,30 @@
-{ stdenv, pkgs }:
+{ stdenv, mkShell, callPackage,
+  appimagekit, patchelf, qt5, status-go, baseImageFactory }:
 
-with pkgs;
 with stdenv;
 
+assert isLinux;
+
 let
-  baseImage = callPackage ./base-image { };
+  inherit (lib) concatStrings catAttrs;
+  baseImage = baseImageFactory "linux";
   appimagekit = callPackage ./appimagekit { };
   linuxdeployqt = callPackage ./linuxdeployqt { inherit appimagekit; };
 
-in
-{
-  buildInputs = [ appimagekit linuxdeployqt patchelf baseImage ];
+in rec {
+  buildInputs = [
+    appimagekit
+    linuxdeployqt
+    patchelf
+    qt5.full
+  ] ++ status-go.buildInputs;
 
-  shellHook = ''
-    export STATUSREACT_LINUX_BASEIMAGE_PATH="${baseImage}/src"
-  '';
+  shell = mkShell {
+    inherit buildInputs;
+    shellHook = concatStrings (catAttrs "shellHook" [ baseImage status-go ]) + ''
+      export QT_PATH="${qt5.full}"
+      export QT_BASEBIN_PATH="${qt5.qtbase.bin}"
+      export PATH="${qt5.full}/bin:$PATH"
+    '';
+  };
 }

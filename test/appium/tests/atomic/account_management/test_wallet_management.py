@@ -1,8 +1,9 @@
-import pytest
+import random
+import string
 
-from tests import marks, camera_access_error_text
+from tests import marks, camera_access_error_text, common_password
 from tests.base_test_case import SingleDeviceTestCase
-from tests.users import wallet_users
+from tests.users import wallet_users, transaction_senders, basic_user, ens_user
 from views.sign_in_view import SignInView
 
 
@@ -14,40 +15,51 @@ class TestWalletManagement(SingleDeviceTestCase):
     @marks.high
     def test_wallet_set_up(self):
         sign_in = SignInView(self.driver)
-        sign_in.create_user()
+        sign_in.recover_access(transaction_senders['A']['passphrase'])
         wallet = sign_in.wallet_button.click()
-        text = 'Simple and secure cryptocurrency wallet'
-        if not wallet.element_by_text(text).is_element_displayed():
-            self.errors.append("'%s' is not displayed" % text)
-        wallet.set_up_button.click()
-        texts = ['Super-safe transactions', 'You should see these three words before signing each transaction',
-                 'If you see a different combo, cancel the transaction and logout.']
+        texts = ['This is your signing phrase', 'These three words prove that a transaction is safe.',
+                 "You should see these words before signing each transaction. If you don't, cancel and sign out."]
         for text in texts:
             if not wallet.element_by_text_part(text).is_element_displayed():
                 self.errors.append("'%s' text is not displayed" % text)
-        phrase_length = len(wallet.sign_in_phrase.list)
-        if phrase_length != 3:
-            self.errors.append('Transaction phrase length is %s' % phrase_length)
-        wallet.done_button.click()
-        for text in ['Remember this!', "You'll need to recognize this to ensure your "
-                                       "transactions are safe. This combo is not stored in your account."]:
-            if not wallet.element_by_text(text).is_element_displayed():
+        phrase = wallet.sign_in_phrase.list
+        if len(phrase) != 3:
+            self.errors.append('Transaction phrase length is %s' % len(phrase))
+        wallet.remind_me_later_button.click()
+        wallet.accounts_status_account.click()
+        send_transaction = wallet.send_transaction_button.click()
+        send_transaction.amount_edit_box.set_value('0')
+        send_transaction.confirm()
+        send_transaction.chose_recipient_button.click()
+        send_transaction.enter_recipient_address_button.click()
+        send_transaction.enter_recipient_address_input.set_value(basic_user['address'])
+        send_transaction.done_button.click()
+        send_transaction.sign_transaction_button.click()
+        for text in texts:
+            if not wallet.element_by_text_part(text).is_element_displayed():
                 self.errors.append("'%s' text is not displayed" % text)
-        wallet.yes_button.click()
-        for element in [wallet.send_transaction_button, wallet.receive_transaction_button,
-                        wallet.transaction_history_button]:
-            if not element.is_element_displayed():
-                self.errors.append('%s button is not shown after wallet setup' % element.name)
-        self.verify_no_errors()
+        phrase_1 = wallet.sign_in_phrase.list
+        if phrase_1 != phrase:
+            self.errors.append("Transaction phrase '%s' doesn't match expected '%s'" % (phrase_1, phrase))
+        wallet.ok_got_it_button.click()
+        wallet.back_button.click(times_to_click=2)
+        wallet.home_button.click()
+        wallet.wallet_button.click()
+        for text in texts:
+            if wallet.element_by_text_part(text).is_element_displayed():
+                self.errors.append('Signing phrase pop up appears after wallet set up')
+                break
+        self.errors.verify_no_errors()
 
     @marks.testrail_id(5384)
-    @marks.high
+    @marks.critical
     def test_open_transaction_on_etherscan(self):
-        user = wallet_users['A']
+        user = wallet_users['D']
         sign_in_view = SignInView(self.driver)
         home_view = sign_in_view.recover_access(user['passphrase'])
         wallet_view = home_view.wallet_button.click()
         wallet_view.set_up_wallet()
+        wallet_view.accounts_status_account.click()
         transactions_view = wallet_view.transaction_history_button.click()
         transaction_details = transactions_view.transactions_table.transaction_by_index(0).click()
         transaction_hash = transaction_details.get_transaction_hash()
@@ -60,11 +72,12 @@ class TestWalletManagement(SingleDeviceTestCase):
     @marks.testrail_id(5427)
     @marks.medium
     def test_copy_transaction_hash(self):
-        user = wallet_users['A']
+        user = wallet_users['D']
         sign_in_view = SignInView(self.driver)
         home_view = sign_in_view.recover_access(user['passphrase'])
         wallet_view = home_view.wallet_button.click()
         wallet_view.set_up_wallet()
+        wallet_view.accounts_status_account.click()
         transactions_view = wallet_view.transaction_history_button.click()
         transaction_details = transactions_view.transactions_table.transaction_by_index(0).click()
         transaction_hash = transaction_details.get_transaction_hash()
@@ -75,7 +88,7 @@ class TestWalletManagement(SingleDeviceTestCase):
         public_chat = home_view.join_public_chat('testchat')
         public_chat.chat_message_input.paste_text_from_clipboard()
         if public_chat.chat_message_input.text != transaction_hash:
-            pytest.fail('Transaction hash was not copied')
+            self.driver.fail('Transaction hash was not copied')
 
     @marks.testrail_id(5341)
     @marks.critical
@@ -84,37 +97,31 @@ class TestWalletManagement(SingleDeviceTestCase):
         sign_in.create_user()
         wallet = sign_in.wallet_button.click()
         wallet.set_up_wallet()
-        wallet.options_button.click()
-        wallet.manage_assets_button.click()
-        select_asset = 'MDS'
-        deselect_asset = 'STT'
-        wallet.asset_checkbox_by_name(select_asset).click()
-        wallet.asset_checkbox_by_name(deselect_asset).click()
-        wallet.cross_icon.click()
-        wallet.asset_by_name(select_asset).scroll_to_element()
-        if not wallet.asset_by_name(select_asset).is_element_displayed():
-            self.errors.append('%s asset is not shown in wallet' % select_asset)
-        if wallet.asset_by_name(deselect_asset).is_element_displayed():
-            self.errors.append('%s asset is shown in wallet but was deselected' % deselect_asset)
-        self.verify_no_errors()
+        asset = "MDS"
+        wallet.select_asset(asset)
+        wallet.asset_by_name(asset).scroll_to_element()
+        if not wallet.asset_by_name(asset).is_element_displayed():
+            self.errors.append('%s asset is not shown in wallet' % asset)
+        wallet.select_asset(asset)
+        if wallet.asset_by_name(asset).is_element_displayed():
+            self.errors.append('%s asset is shown in wallet but was deselected' % asset)
+        self.errors.verify_no_errors()
 
     @marks.testrail_id(5358)
-    @marks.critical
+    @marks.medium
     def test_backup_recovery_phrase_warning_from_wallet(self):
         sign_in = SignInView(self.driver)
         sign_in.create_user()
         wallet = sign_in.wallet_button.click()
         wallet.set_up_wallet()
-        if wallet.backup_recovery_phrase.is_element_present():
-            pytest.fail("'Backup your Recovery phrase' option is shown on Wallet for an account with no funds")
-        wallet.receive_transaction_button.click()
-        address = wallet.address_text.text[2:]
-        wallet.get_back_to_home_view()
-        home = wallet.home_button.click()
-        self.network_api.get_donate(address)
-        home.wallet_button.click()
-        if not wallet.backup_recovery_phrase.is_element_present():
-            pytest.fail("'Backup your Recovery phrase' option is not shown on Wallet for an account with funds")
+        if wallet.backup_recovery_phrase_warning_text.is_element_present():
+            self.driver.fail("'Back up your seed phrase' warning is shown on Wallet while no funds are present")
+        address = wallet.get_wallet_address()
+        self.network_api.get_donate(address[2:])
+        wallet.back_button.click()
+        if not wallet.backup_recovery_phrase_warning_text.is_element_present(30):
+            self.driver.fail("'Back up your seed phrase' warning is not shown on Wallet with funds")
+        wallet.backup_recovery_phrase_warning_text.click()
         profile = wallet.get_profile_view()
         profile.backup_recovery_phrase()
 
@@ -127,15 +134,13 @@ class TestWalletManagement(SingleDeviceTestCase):
         profile.switch_network('Mainnet with upstream RPC')
         wallet = sign_in.wallet_button.click()
         wallet.set_up_wallet()
-        wallet.options_button.click()
-        wallet.manage_assets_button.click()
         asset_name = 'CryptoKitties'
-        wallet.asset_checkbox_by_name(asset_name).click()
-        wallet.cross_icon.click()
+        wallet.select_asset(asset_name)
+        wallet.accounts_status_account.click()
         send_transaction = wallet.send_transaction_button.click()
         send_transaction.select_asset_button.click()
         if send_transaction.asset_by_name(asset_name).is_element_displayed():
-            pytest.fail('Collectibles can be sent from wallet')
+            self.driver.fail('Collectibles can be sent from wallet')
 
     @marks.testrail_id(5467)
     @marks.medium
@@ -144,25 +149,27 @@ class TestWalletManagement(SingleDeviceTestCase):
         sign_in.create_user()
         wallet = sign_in.wallet_button.click()
         wallet.set_up_wallet()
+        wallet.accounts_status_account.click()
         send_transaction = wallet.send_transaction_button.click()
         send_transaction.chose_recipient_button.click()
         send_transaction.scan_qr_code_button.click()
         send_transaction.deny_button.click()
         send_transaction.element_by_text(camera_access_error_text).wait_for_visibility_of_element(3)
         send_transaction.ok_button.click()
-        send_transaction.chose_recipient_button.click()
         send_transaction.scan_qr_code_button.click()
         send_transaction.deny_button.wait_for_visibility_of_element(2)
 
     @marks.testrail_id(5435)
     @marks.medium
+    @marks.skip
+    # TODO: e2e blocker: 9225 (should be updated and enabled)
     def test_filter_transactions_history(self):
         user = wallet_users['C']
         sign_in_view = SignInView(self.driver)
         sign_in_view.recover_access(passphrase=user['passphrase'])
         wallet_view = sign_in_view.wallet_button.click()
         wallet_view.set_up_wallet()
-
+        wallet_view.accounts_status_account.click()
         transaction_history = wallet_view.transaction_history_button.click()
         transaction_history.filters_button.click()
         for filter_name in 'Outgoing', 'Pending', 'Failed':
@@ -172,7 +179,7 @@ class TestWalletManagement(SingleDeviceTestCase):
             details = transaction_history.transactions_table.transaction_by_index(i).click()
             if details.get_recipient_address() != '0x' + user['address'] \
                     or details.element_by_text('Failed').is_element_displayed():
-                pytest.fail('Incoming transactions are not filtered')
+                self.driver.fail('Incoming transactions are not filtered')
             details.back_button.click()
 
         transaction_history.filters_button.click()
@@ -183,7 +190,7 @@ class TestWalletManagement(SingleDeviceTestCase):
             details = transaction_history.transactions_table.transaction_by_index(i).click()
             if details.get_sender_address() != '0x' + user['address'] \
                     or details.element_by_text('Failed').is_element_displayed():
-                pytest.fail('Outgoing transactions are not filtered')
+                self.driver.fail('Outgoing transactions are not filtered')
             details.back_button.click()
 
         transaction_history.filters_button.click()
@@ -193,9 +200,9 @@ class TestWalletManagement(SingleDeviceTestCase):
         for i in range(transaction_history.transactions_table.get_transactions_number()):
             details = transaction_history.transactions_table.transaction_by_index(i).click()
             if not details.element_by_text('Failed').is_element_displayed():
-                pytest.fail('Failed transactions are not filtered')
+                self.driver.fail('Failed transactions are not filtered')
             details.back_button.click()
-        self.verify_no_errors()
+        self.errors.verify_no_errors()
 
     @marks.testrail_id(5381)
     @marks.high
@@ -208,5 +215,188 @@ class TestWalletManagement(SingleDeviceTestCase):
         profile = home_view.profile_button.click()
         wallet_view = profile.wallet_button.click()
         wallet_view.set_up_wallet()
-        if wallet_view.collectible_amount_by_name('kdo') != '1':
-            self.driver.fail('User collectibles amount does not match!')
+        wallet_view.accounts_status_account.click()
+        wallet_view.collectibles_button.click()
+        if not wallet_view.element_by_text('KDO').is_element_displayed():
+            self.driver.fail('User collectibles token name in not shown')
+        if not wallet_view.element_by_text('1').is_element_displayed():
+            self.driver.fail('User collectibles amount does not match')
+
+    @marks.testrail_id(5346)
+    @marks.high
+    def test_collectible_from_wallet_opens_in_browser_view(self):
+        passphrase = wallet_users['F']['passphrase']
+        signin_view = SignInView(self.driver)
+        home_view = signin_view.recover_access(passphrase=passphrase)
+        profile = home_view.profile_button.click()
+        profile.switch_network('Mainnet with upstream RPC')
+        wallet_view = profile.wallet_button.click()
+        wallet_view.set_up_wallet()
+        wallet_view.accounts_status_account.click()
+        wallet_view.collectibles_button.click()
+        wallet_view.cryptokitties_in_collectibles_button.click()
+        web_view = wallet_view.view_in_cryptokitties_button.click()
+        web_view.element_by_text('cryptokitties.co').click()
+        cryptokitty_link = 'https://www.cryptokitties.co/kitty/1338226'
+        if not web_view.element_by_text(cryptokitty_link).is_element_displayed():
+            self.driver.fail('Cryptokitty detail page not opened')
+
+    @marks.testrail_id(6208)
+    @marks.high
+    def test_add_custom_token(self):
+        contract_address = '0x25B1bD06fBfC2CbDbFc174e10f1B78b1c91cc77B'
+        name = 'SNTMiniMeToken'
+        symbol = 'SNT'
+        decimals = '18'
+        sign_in_view = SignInView(self.driver)
+        sign_in_view.create_user()
+        wallet_view = sign_in_view.wallet_button.click()
+        wallet_view.set_up_wallet()
+        wallet_view.multiaccount_more_options.click()
+        wallet_view.manage_assets_button.click()
+        token_view = wallet_view.add_custom_token_button.click()
+        token_view.contract_address_input.send_keys(contract_address)
+        token_view.progress_bar.wait_for_invisibility_of_element(30)
+        if token_view.name_input.text != name:
+            self.errors.append('Name for custom token was not set')
+        if token_view.symbol_input.text != symbol:
+            self.errors.append('Symbol for custom token was not set')
+        if token_view.decimals_input.text != decimals:
+            self.errors.append('Decimals for custom token was not set')
+        token_view.add_button.click()
+        token_view.back_button.click()
+        if not wallet_view.asset_by_name(symbol).is_element_displayed():
+            self.errors.append('Custom token is not shown on Wallet view')
+        wallet_view.accounts_status_account.click()
+        send_transaction = wallet_view.send_transaction_button.click()
+        token_element = send_transaction.asset_by_name(symbol)
+        send_transaction.select_asset_button.click_until_presence_of_element(token_element)
+        if not token_element.is_element_displayed():
+            self.errors.append('Custom token is not shown on Send Transaction view')
+        self.errors.verify_no_errors()
+
+    @marks.testrail_id(6224)
+    @marks.critical
+    def test_add_account_to_multiaccount_instance(self):
+        sign_in_view = SignInView(self.driver)
+        sign_in_view.create_user()
+        wallet_view = sign_in_view.wallet_button.click()
+        wallet_view.set_up_wallet()
+        wallet_view.add_account_button.click()
+        wallet_view.add_an_account_button.click()
+        wallet_view.generate_new_account_button.click()
+        wallet_view.generate_account_button.click()
+        if wallet_view.element_by_text('Account added').is_element_displayed():
+            self.driver.fail('Account is added without password')
+        wallet_view.enter_your_password_input.send_keys('000000')
+        wallet_view.generate_account_button.click()
+        if not wallet_view.element_by_text_part('Password seems to be incorrect').is_element_displayed():
+            self.driver.fail("Incorrect password validation is not performed")
+        wallet_view.enter_your_password_input.clear()
+        wallet_view.enter_your_password_input.send_keys(common_password)
+        wallet_view.generate_account_button.click()
+        account_name = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(10))
+        wallet_view.account_name_input.send_keys(account_name)
+        wallet_view.account_color_button.select_color_by_position(1)
+        wallet_view.finish_button.click()
+        account_button = wallet_view.get_account_by_name(account_name)
+        if not account_button.is_element_displayed():
+            self.driver.fail('Account was not added')
+        if not account_button.color_matches('multi_account_color.png'):
+            self.driver.fail('Account color does not match expected')
+
+    @marks.testrail_id(6244)
+    @marks.high
+    def test_add_and_delete_watch_only_account_to_multiaccount_instance(self):
+        sign_in_view = SignInView(self.driver)
+        sign_in_view.create_user()
+        wallet_view = sign_in_view.wallet_button.click()
+        wallet_view.set_up_wallet()
+
+        wallet_view.just_fyi('Add watch-only account')
+        wallet_view.add_account_button.click()
+        wallet_view.add_watch_only_address_button.click()
+        wallet_view.enter_address_input.send_keys(basic_user['address'])
+        wallet_view.next_button.click()
+        account_name = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(10))
+        wallet_view.account_name_input.send_keys(account_name)
+        wallet_view.finish_button.click()
+        account_button = wallet_view.get_account_by_name(account_name)
+        if not account_button.is_element_displayed():
+            self.driver.fail('Account was not added')
+
+        wallet_view.just_fyi('Check that overall balance is changed after adding watch-only account')
+        for asset in ('ETHro', 'ADI', 'STT'):
+            wallet_view.wait_balance_is_changed(asset)
+
+        wallet_view.just_fyi('Check individual watch-only account view, settings and receive option')
+        wallet_view.get_account_by_name(account_name).click()
+        if wallet_view.send_transaction_button.is_element_displayed():
+            self.errors.append('Send button is shown on watch-only wallet')
+        if not wallet_view.element_by_text('Watch-only').is_element_displayed():
+            self.errors.append('No "Watch-only" label is shown on watch-only wallet')
+        wallet_view.receive_transaction_button.click()
+        if wallet_view.address_text.text[2:] != basic_user['address']:
+            self.errors.append('Wrong address %s is shown in "Receive" popup for watch-only account ' % wallet_view.address_text.text)
+        wallet_view.close_share_popup()
+        wallet_view.get_account_options_by_name(account_name).click()
+        wallet_view.account_settings_button.click()
+        if not wallet_view.element_by_text('Watch-only').is_element_displayed():
+            self.errors.append('"Watch-only" type is not shown in account settings')
+
+        wallet_view.just_fyi('Delete watch-only account')
+        wallet_view.delete_account_button.click()
+        wallet_view.yes_button.click()
+        if account_button.is_element_displayed():
+            self.driver.fail('Account was not deleted')
+        for asset in ('ETHro', 'ADI', 'STT'):
+            balance = wallet_view.get_asset_amount_by_name(asset)
+            if balance != 0:
+                self.errors.append("Balance for %s is not updated after deleting watch-only account" % asset)
+
+        self.errors.verify_no_errors()
+
+
+    @marks.testrail_id(5406)
+    @marks.critical
+    def test_ens_username_recipient(self):
+        sign_in = SignInView(self.driver)
+        sign_in.create_user()
+
+        sign_in.just_fyi('switching to mainnet')
+        profile = sign_in.profile_button.click()
+        profile.switch_network('Mainnet with upstream RPC')
+        wallet = profile.wallet_button.click()
+
+        wallet.just_fyi('checking that "stateofus.eth" name will be resolved as recipient')
+        wallet.set_up_wallet()
+        wallet.accounts_status_account.click()
+        send_transaction = wallet.send_transaction_button.click()
+        send_transaction.chose_recipient_button.click()
+        send_transaction.enter_recipient_address_button.click()
+        send_transaction.enter_recipient_address_input.set_value('%s.stateofus.eth' % ens_user['ens'])
+        send_transaction.done_button.click()
+        formatted_ens_user_address = send_transaction.get_formatted_recipient_address(ens_user['address'])
+
+        if send_transaction.enter_recipient_address_text.text != formatted_ens_user_address:
+            self.errors.append('ENS address on stateofus.eth is not resolved as recipient')
+
+        wallet.just_fyi('checking that ".eth" name will be resolved as recipient')
+        send_transaction.chose_recipient_button.click()
+        send_transaction.enter_recipient_address_button.click()
+        send_transaction.enter_recipient_address_input.set_value(ens_user['ens_another_domain'])
+        send_transaction.done_button.click()
+
+        if send_transaction.enter_recipient_address_text.text != formatted_ens_user_address:
+            self.errors.append('ENS address on another domain is not resolved as recipient')
+
+        wallet.just_fyi('checking that "stateofus.eth" name without domain will be resolved as recipient')
+        send_transaction.chose_recipient_button.click()
+        send_transaction.enter_recipient_address_button.click()
+        send_transaction.enter_recipient_address_input.set_value(ens_user['ens'])
+        send_transaction.done_button.click()
+
+        if send_transaction.enter_recipient_address_text.text != formatted_ens_user_address:
+            self.errors.append('ENS address "stateofus.eth" without domain is not resolved as recipient')
+
+        self.errors.verify_no_errors()

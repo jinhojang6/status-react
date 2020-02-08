@@ -1,140 +1,112 @@
 (ns status-im.data-store.messages
-  (:require [re-frame.core :as re-frame]
-            [clojure.set :as clojure.set]
+  (:require [clojure.set :as clojure.set]
+            [re-frame.core :as re-frame]
+            [status-im.utils.fx :as fx]
             [clojure.string :as string]
+            [taoensso.timbre :as log]
+            [re-frame.core :as re-frame]
+            [status-im.utils.types :as utils.types]
+            [status-im.ethereum.json-rpc :as json-rpc]
             [status-im.constants :as constants]
-            [status-im.data-store.realm.core :as core]
-            [status-im.utils.core :as utils]
-            [status-im.js-dependencies :as dependencies]))
+            [status-im.utils.core :as utils]))
 
-(defn- transform-message [{:keys [content] :as message}]
-  (when-let [parsed-content (utils/safe-read-message-content content)]
-    (-> message
-        (update :message-type keyword)
-        (assoc :content parsed-content))))
-
-(defn- exclude-messages [query message-ids]
-  (let [string-queries (map #(str "message-id != \"" % "\"") message-ids)]
-    (core/filtered query (string/join " AND " string-queries))))
-
-(defn- get-by-chat-id
-  ([chat-id]
-   (get-by-chat-id chat-id nil))
-  ([chat-id {:keys [last-clock-value message-ids]}]
-   (let [messages (cond-> (core/get-by-field @core/account-realm :message :chat-id chat-id)
-                    :always (core/multi-field-sorted [["clock-value" true] ["message-id" true]])
-                    last-clock-value    (core/filtered (str "clock-value <= \"" last-clock-value "\""))
-                    (seq message-ids)   (exclude-messages message-ids)
-                    :always (core/page 0  constants/default-number-of-messages)
-                    :always (core/all-clj :message))
-         clock-value (-> messages last :clock-value)
-         new-message-ids (->> messages
-                              (filter #(= clock-value (:clock-value %)))
-                              (map :message-id)
-                              (into #{}))]
-     {:all-loaded? (> constants/default-number-of-messages (count messages))
-      ;; We paginate using clock-value + message-id to break ties, we need
-      ;; to exclude previously loaded messages with identical clock value
-      ;; otherwise we might fetch exactly the same page if all the messages
-      ;; in a page have the same clock-value. The initial idea was to use a
-      ;; cursor clock-value-message-id but realm does not support </> operators
-      ;; on strings
-      :pagination-info {:last-clock-value clock-value
-                        :message-ids (if (= clock-value last-clock-value)
-                                       (clojure.set/union message-ids new-message-ids)
-                                       new-message-ids)}
-      :messages    (keep transform-message messages)})))
-
-(defn get-message-id-by-old [old-message-id]
-  (when-let
-   [js-message (core/single
-                (core/get-by-field
-                 @core/account-realm
-                 :message :old-message-id old-message-id))]
-    (aget js-message "message-id")))
-
-(defn- get-references-by-ids
-  [message-ids]
-  (when (seq message-ids)
-    (keep (fn [{:keys [response-to response-to-v2]}]
-            (when-let [js-message
-                       (if response-to-v2
-                         (.objectForPrimaryKey @core/account-realm "message" response-to-v2)
-                         (core/single (core/get-by-field
-                                       @core/account-realm
-                                       :message :old-message-id response-to)))]
-              (when-let [deserialized-message (-> js-message
-                                                  (core/realm-obj->clj :message)
-                                                  transform-message)]
-                [(or response-to-v2 response-to) deserialized-message])))
-          message-ids)))
-
-(def default-values
-  {:to nil})
-
-(re-frame/reg-cofx
- :data-store/get-messages
- (fn [cofx _]
-   (assoc cofx :get-stored-messages get-by-chat-id)))
-
-(defn- sha3 [s]
-  (.sha3 dependencies/Web3.prototype s))
-
-(re-frame/reg-cofx
- :data-store/get-referenced-messages
- (fn [cofx _]
-   (assoc cofx :get-referenced-messages get-references-by-ids)))
-
-(defn get-user-messages
-  [public-key]
-  (.reduce (core/get-by-field @core/account-realm
-                              :message :from public-key)
-           (fn [acc message-object _ _]
-             (conj acc
-                   {:message-id (aget message-object "message-id")
-                    :chat-id (aget message-object "chat-id")}))
-           []))
-
-(re-frame/reg-cofx
- :data-store/get-user-messages
- (fn [cofx _]
-   (assoc cofx :get-user-messages get-user-messages)))
-
-(defn prepare-content [content]
-  (if (string? content)
+(defn ->rpc [{:keys [content] :as message}]
+  (cond-> message
     content
-    (pr-str content)))
+    (assoc :text (:text content)
+           :sticker (:sticker content))
+    :always
+    (clojure.set/rename-keys {:chat-id :chatId
+                              :clock-value :clock})))
 
-(defn- prepare-message [message]
-  (utils/update-if-present message :content prepare-content))
+(defn <-rpc [message]
+  (-> message
+      (clojure.set/rename-keys {:id :message-id
+                                :whisperTimestamp :whisper-timestamp
+                                :commandParameters :command-parameters
+                                :messageType :message-type
+                                :localChatId :chat-id
+                                :contentType  :content-type
+                                :clock  :clock-value
+                                :quotedMessage :quoted-message
+                                :outgoingStatus :outgoing-status})
 
-(defn save-message-tx
-  "Returns tx function for saving message"
-  [{:keys [message-id from] :as message}]
-  (fn [realm]
-    (core/create realm
-                 :message
-                 (prepare-message (merge default-values
-                                         message
-                                         {:from (or from "anonymous")}))
-                 true)))
+      (update :outgoing-status keyword)
+      (update :command-parameters clojure.set/rename-keys {:transactionHash :transaction-hash
+                                                           :commandState :command-state})
+      (assoc :content {:chat-id (:chatId message)
+                       :text (:text message)
+                       :sticker (:sticker message)
+                       :ens-name (:ensName message)
+                       :line-count (:lineCount message)
+                       :parsed-text (:parsedText message)
+                       :rtl (:rtl message)
+                       :response-to (:responseTo message)}
+             :outgoing (boolean (:outgoingStatus message)))
+      (dissoc :ensName :chatId :text :rtl :responseTo :sticker :lineCount :parsedText)))
 
-(defn delete-message-tx
-  "Returns tx function for deleting message"
-  [message-id]
-  (fn [realm]
-    (when-let [message (core/get-by-field realm :message :message-id message-id)]
-      (core/delete realm message)
-      (core/delete realm (core/get-by-field realm :user-status :message-id message-id)))))
+(defn update-outgoing-status-rpc [message-id status]
+  {::json-rpc/call [{:method "shhext_updateMessageOutgoingStatus"
+                     :params [message-id status]
+                     :on-success #(log/debug "updated message outgoing stauts" message-id status)
+                     :on-failure #(log/error "failed to update message outgoing status" message-id status %)}]})
 
-(defn delete-chat-messages-tx
-  "Returns tx function for deleting messages with user statuses for given chat-id"
-  [chat-id]
-  (fn [realm]
-    (core/delete realm (core/get-by-field realm :message :chat-id chat-id))
-    (core/delete realm (core/get-by-field realm :user-status :chat-id chat-id))))
+(defn save-system-messages-rpc [messages]
+  (json-rpc/call {:method "shhext_addSystemMessages"
+                  :params [(map ->rpc messages)]
+                  :on-success #(re-frame/dispatch [:messages/system-messages-saved (map <-rpc %)])
+                  :on-failure #(log/error "failed to save messages" %)}))
 
-(defn message-exists? [message-id]
-  (if @core/account-realm
-    (not (nil? (.objectForPrimaryKey @core/account-realm "message" message-id)))
-    false))
+(defn messages-by-chat-id-rpc [chat-id cursor limit on-success]
+  {::json-rpc/call [{:method "shhext_chatMessages"
+                     :params [chat-id cursor limit]
+                     :on-success (fn [result]
+                                   (on-success (update result :messages #(map <-rpc %))))
+                     :on-failure #(log/error "failed to get messages" %)}]})
+
+(defn mark-seen-rpc [chat-id ids]
+  {::json-rpc/call [{:method "shhext_markMessagesSeen"
+                     :params [chat-id ids]
+                     :on-success #(log/debug "successfully marked as seen")
+                     :on-failure #(log/error "failed to get messages" %)}]})
+
+(defn delete-message-rpc [id]
+  {::json-rpc/call [{:method "shhext_deleteMessage"
+                     :params [id]
+                     :on-success #(log/debug "successfully deleted message" id)
+                     :on-failure #(log/error "failed to delete message" % id)}]})
+
+(defn delete-messages-from-rpc [author]
+  {::json-rpc/call [{:method "shhext_deleteMessagesFrom"
+                     :params [author]
+                     :on-success #(log/debug "successfully deleted messages from" author)
+                     :on-failure #(log/error "failed to delete messages from" % author)}]})
+
+(defn delete-messages-by-chat-id-rpc [chat-id]
+  {::json-rpc/call [{:method "shhext_deleteMessagesByChatID"
+                     :params [chat-id]
+                     :on-success #(log/debug "successfully deleted messages by chat-id" chat-id)
+                     :on-failure #(log/error "failed to delete messages by chat-id" % chat-id)}]})
+
+(re-frame/reg-fx
+ ::save-system-message
+ (fn [messages]
+   (save-system-messages-rpc messages)))
+
+(fx/defn save-system-messages [cofx messages]
+  {::save-system-message messages})
+
+(fx/defn delete-message [cofx id]
+  (delete-message-rpc id))
+
+(fx/defn delete-messages-from [cofx author]
+  (delete-messages-from-rpc author))
+
+(fx/defn mark-messages-seen [_ chat-id ids]
+  (mark-seen-rpc chat-id ids))
+
+(fx/defn update-outgoing-status [cofx message-id status]
+  (update-outgoing-status-rpc message-id status))
+
+(fx/defn delete-messages-by-chat-id [cofx chat-id]
+  (delete-messages-by-chat-id-rpc chat-id))

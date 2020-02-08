@@ -22,21 +22,20 @@ pipeline {
   }
 
   environment {
-    TARGET_OS = 'android'
-    LANG     = 'en_US.UTF-8'
-    LANGUAGE = 'en_US.UTF-8'
-    LC_ALL   = 'en_US.UTF-8'
+    LANG     = "en_US.UTF-8"
+    LC_ALL   = "en_US.UTF-8"
+    LANGUAGE = "en_US.UTF-8"
+    TARGET   = 'android'
+    BUILD_ENV = 'prod'
+    NIX_CONF_DIR = "${env.WORKSPACE}/nix"
     FASTLANE_DISABLE_COLORS = 1
-    REALM_DISABLE_ANALYTICS = 1
-    CI_ENVIRONMENT    = 'jenkins'
     /* since we are mounting it we need to specify location */
     STATUS_RELEASE_STORE_FILE = '/home/jenkins/status-im.keystore'
-    /* bundle cache is sensitive to being used by different ruby versions */
-    BUNDLE_PATH       = "/var/tmp/bundle-${EXECUTOR_NUMBER}"
     /* We use EXECUTOR_NUMBER to avoid multiple instances clashing */
-    LEIN_HOME         = "/var/tmp/lein-${EXECUTOR_NUMBER}"
-    YARN_CACHE_FOLDER = "/var/tmp/yarn-${EXECUTOR_NUMBER}"
-    GRADLE_USER_HOME  = "/var/tmp/gradle-${EXECUTOR_NUMBER}"
+    LEIN_HOME = "/var/tmp/lein-${EXECUTOR_NUMBER}"
+    /* coverage report identification */
+    COVERALLS_SERVICE_NAME = "jenkins"
+    COVERALLS_SERVICE_JOB_ID = "${JOB_NAME}#${BUILD_NUMBER}"
   }
 
   stages {
@@ -44,9 +43,9 @@ pipeline {
       steps {
         script {
           /* Necessary to load methods */
-          mobile = load 'ci/mobile.groovy'
-          cmn    = load 'ci/common.groovy'
-          btype  = cmn.utils.getBuildType()
+          android = load 'ci/android.groovy'
+          cmn     = load 'ci/common.groovy'
+          btype   = cmn.utils.getBuildType()
           print "Running ${btype} build!"
           cmn.ci.abortPreviousRunningBuilds()
           /* Cleanup and Prep */
@@ -54,43 +53,71 @@ pipeline {
         }
       }
     }
-    stage('Lint') {
+    stage('Implicit dependencies') {
       steps {
-        script { cmn.utils.nix_sh('lein cljfmt check') }
+        /* Build implicit dependencies if needed (we run `lein deps :tree` but it's not really required, for this purpose)
+           Implicit dependencies include building a patched node_modules, fetching maven dependencies, and anything else required.
+           We do this before the parallel steps so we have a known starting situation. */
+        script { cmn.nix.shell('lein deps :tree', attr: 'shells.lein') }
       }
     }
-    stage('Tests') {
-      steps {
-        script { cmn.utils.nix_sh('lein test-cljs') }
+    stage('Parallel Assemble') {
+      parallel {
+        stage('Checks') { stages {
+          stage('Lint') {
+            steps {
+              script { cmn.nix.shell('lein cljfmt check', attr: 'shells.lein') }
+            }
+          }
+          stage('Tests') {
+            steps {
+              script { cmn.nix.shell('lein test-cljs', attr: 'shells.lein') }
+            }
+          }
+        } }
+        stage('Build') { stages {
+          stage('JSBundle') {
+            steps {
+              script {
+                cmn.nix.shell('make jsbundle-android', pure: false)
+              }
+            }
+          }
+          stage('Bundle') {
+            steps {
+              script { apks = android.bundle() }
+            }
+          }
+        } }
       }
     }
-    stage('Build') {
-      steps {
-        script { cmn.utils.nix_sh('lein prod-build-android') }
-      }
-    }
-    stage('Bundle') {
-      steps {
-        script { apk = mobile.android.bundle() }
-      }
-    }
-    stage('Archive') {
-      steps {
-        archiveArtifacts apk
-      }
-    }
-    stage('Upload') {
-      steps {
-        script {
-          env.PKG_URL = cmn.utils.uploadArtifact(apk)
-          /* build type specific */
-          switch (btype) {
-            case 'release':
-              mobile.android.uploadToPlayStore(); break;
-            case 'nightly':
-              env.DIAWI_URL = mobile.android.uploadToDiawi(); break;
-            case 'e2e':
-              env.SAUCE_URL = mobile.android.uploadToSauceLabs()
+    stage('Parallel Upload') {
+      parallel {
+        stage('Archive') {
+          steps { script {
+            apks.each { archiveArtifacts it }
+          } }
+        }
+        stage('Upload') {
+          steps {
+            script {
+              def urls = apks.collect { cmn.uploadArtifact(it) }
+              /* return only the universal APK */
+              if (urls.size() > 1) { 
+                env.PKG_URL = urls.find { it.contains('universal') }
+              } else { /* if no universal is available pick first */
+                env.PKG_URL = urls.first()
+              }
+              /* build type specific */
+              switch (btype) {
+                case 'release':
+                  android.uploadToPlayStore(); break;
+                case 'nightly':
+                  env.DIAWI_URL = android.uploadToDiawi(); break;
+                case 'e2e':
+                  env.SAUCE_URL = android.uploadToSauceLabs(); break;
+              }
+            }
           }
         }
       }
@@ -102,7 +129,8 @@ pipeline {
     }
   }
   post {
-    success { script { load('ci/common.groovy').notifyPR(true) } }
-    failure { script { load('ci/common.groovy').notifyPR(false) } }
+    success { script { load('ci/github.groovy').notifyPR(true) } }
+    failure { script { load('ci/github.groovy').notifyPR(false) } }
+    always { sh 'make _fix-node-perms' }
   }
 }
