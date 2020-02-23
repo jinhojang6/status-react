@@ -401,11 +401,11 @@
 
 (handlers/register-handler-fx
  :chat.ui/clear-history-pressed
- (fn [_ _]
+ (fn [_ [_ chat-id]]
    {:ui/show-confirmation {:title               (i18n/label :t/clear-history-title)
                            :content             (i18n/label :t/clear-history-confirmation-content)
                            :confirm-button-text (i18n/label :t/clear-history-action)
-                           :on-accept           #(re-frame/dispatch [:chat.ui/clear-history])}}))
+                           :on-accept           #(re-frame/dispatch [:chat.ui/clear-history chat-id])}}))
 
 (handlers/register-handler-fx
  :chat.ui/fetch-history-pressed
@@ -494,10 +494,7 @@
 (handlers/register-handler-fx
  :chat.ui/load-more-messages
  (fn [cofx _]
-   (let [chat-id (get-in cofx [:db :current-chat-id])]
-     (fx/merge cofx
-               (chat.loading/load-more-messages)
-               (mailserver/load-gaps-fx chat-id)))))
+   (chat.loading/load-more-messages cofx)))
 
 (handlers/register-handler-fx
  :chat.ui/start-chat
@@ -516,8 +513,8 @@
 
 (handlers/register-handler-fx
  :chat.ui/clear-history
- (fn [{{:keys [current-chat-id]} :db :as cofx} _]
-   (chat/clear-history cofx current-chat-id)))
+ (fn [cofx  [_ chat-id]]
+   (chat/clear-history cofx chat-id)))
 
 (handlers/register-handler-fx
  :chat.ui/resend-message
@@ -1244,13 +1241,6 @@
                #(when ens-name
                   (contact/name-verified % public-key ens-name))))))
 
-;; search module
-
-(handlers/register-handler-fx
- :search/filter-changed
- (fn [cofx [_ search-filter]]
-   (search/filter-changed cofx search-filter)))
-
 ;; pairing module
 
 (handlers/register-handler-fx
@@ -1369,7 +1359,7 @@
    (stickers/pending-pack cofx id)))
 
 (handlers/register-handler-fx
- :stickers/pending-timout
+ :stickers/pending-timeout
  (fn [cofx _]
    (stickers/pending-timeout cofx)))
 

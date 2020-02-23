@@ -99,6 +99,7 @@
 (reg-root-key-sub :supported-biometric-auth :supported-biometric-auth)
 (reg-root-key-sub :app-active-since :app-active-since)
 (reg-root-key-sub :connectivity/ui-status-properties :connectivity/ui-status-properties)
+(reg-root-key-sub :logged-in-since :logged-in-since)
 
 ;;NOTE this one is not related to ethereum network
 ;; it is about cellular network/ wifi network
@@ -374,10 +375,22 @@
    (get-in animations [type item-id :delete-swiped])))
 
 (re-frame/reg-sub
- :search/filter
+ :search/home-filter
  :<- [:ui/search]
  (fn [search]
-   (get search :filter)))
+   (get search :home-filter)))
+
+(re-frame/reg-sub
+ :search/currency-filter
+ :<- [:ui/search]
+ (fn [search]
+   (get search :currency-filter)))
+
+(re-frame/reg-sub
+ :search/token-filter
+ :<- [:ui/search]
+ (fn [search]
+   (get search :token-filter)))
 
 (defn- node-version [web3-node-version]
   (or web3-node-version "N/A"))
@@ -1010,7 +1023,7 @@
 (re-frame/reg-sub
  :home-items
  :<- [:chats/active-chats]
- :<- [:search/filter]
+ :<- [:search/home-filter]
  :<- [:search/filtered-chats]
  (fn [[chats search-filter filtered-chats]]
    (if (or (nil? search-filter)
@@ -1574,11 +1587,12 @@
                            disconnected?
                            :t/offline
 
-                           :else nil)]
+                           :else nil)
+         connected?       (and (nil? error-label) (not= :mobile-network error-label))]
      {:message            (or error-label :t/connected)
-      :connected?         (and (nil? error-label) (not= :mobile-network error-label))
+      :connected?         connected?
       :connecting?        (= error-label :t/connecting)
-      :loading-indicator? mailserver-fetching?
+      :loading-indicator? (and mailserver-fetching? connected?)
       :on-press-event       (cond
                               mailserver-connection-error?
                               :mailserver.ui/reconnect-mailserver-pressed
@@ -1826,25 +1840,53 @@
   the search-filter
   apply-filter returns nil if there is no element that match the filter
   apply-filter returns full collection if the search-filter is empty"
-  [search-filter coll extract-attributes-fn]
-  (if (not-empty search-filter)
-    (let [search-filter (string/lower-case search-filter)
-          results       (filter (fn [element]
-                                  (some (fn [s]
-                                          (when (string? s)
-                                            (string/includes? (string/lower-case s)
-                                                              search-filter)))
-                                        (extract-attributes-fn element)))
-                                coll)]
-      (sort-by-timestamp results))
-    (sort-by-timestamp coll)))
+  [search-filter coll extract-attributes-fn sort?]
+  (let [results (if (not-empty search-filter)
+                  (let [search-filter (string/lower-case search-filter)]
+                    (filter (fn [element]
+                              (some (fn [v]
+                                      (let [s (cond (string? v) v
+                                                    (keyword? v) (name v))]
+                                        (when (string? s)
+                                          (string/includes? (string/lower-case s)
+                                                            search-filter))))
+                                    (extract-attributes-fn element)))
+                            coll))
+                  coll)]
+    (if sort?
+      (sort-by-timestamp results)
+      results)))
 
 (re-frame/reg-sub
  :search/filtered-chats
  :<- [:chats/active-chats]
- :<- [:search/filter]
+ :<- [:search/home-filter]
  (fn [[chats search-filter]]
-   (apply-filter search-filter chats extract-chat-attributes)))
+   (apply-filter search-filter chats extract-chat-attributes true)))
+
+(defn extract-currency-attributes [currency]
+  (let [{:keys [code display-name]} (val currency)]
+    [code display-name]))
+
+(re-frame/reg-sub
+ :search/filtered-currencies
+ :<- [:search/currency-filter]
+ (fn [search-currency-filter]
+   {:search-filter search-currency-filter
+    :currencies (apply-filter search-currency-filter constants/currencies extract-currency-attributes false)}))
+
+(defn extract-token-attributes [token]
+  (let [{:keys [symbol name]} token]
+    [symbol name]))
+
+(re-frame/reg-sub
+ :wallet/filtered-grouped-chain-tokens
+ :<- [:wallet/grouped-chain-tokens]
+ :<- [:search/token-filter]
+ (fn [[{custom-tokens true default-tokens nil} search-token-filter]]
+   {:search-filter search-token-filter
+    :tokens {true (apply-filter search-token-filter custom-tokens extract-token-attributes false)
+             nil (apply-filter search-token-filter default-tokens extract-token-attributes false)}}))
 
 ;; TRIBUTE TO TALK
 (re-frame/reg-sub

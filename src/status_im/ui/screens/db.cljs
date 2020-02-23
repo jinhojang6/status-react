@@ -51,7 +51,7 @@
              :dimensions/window                  (dimensions/window)
              :registry                           {}
              :stickers/packs-owned               #{}
-             :stickers/packs-pending            #{}
+             :stickers/packs-pending             #{}
              :hardwallet                         {:nfc-enabled?   false
                                                   :pin            {:original     []
                                                                    :confirmation []
@@ -82,6 +82,7 @@
 (spec/def ::app-state string?)
 (spec/def ::app-in-background-since (spec/nilable number?))
 (spec/def ::app-active-since (spec/nilable number?))
+(spec/def ::logged-in-since (spec/nilable number?))
 
 ;;;;NODE
 
@@ -276,6 +277,7 @@
                                    ::app-state
                                    ::app-in-background-since
                                    ::app-active-since
+                                   ::logged-in-since
                                    ::hardwallet
                                    ::auth-method
                                    :multiaccount/multiaccount
